@@ -3,13 +3,10 @@ use crate::api::error::NtResult;
 
 use super::WdfObject;
 
-pub struct Device(WDFDEVICE);
+pub struct Device;
 
 impl Device {
-    pub unsafe fn new(inner: WDFDEVICE) -> Self {
-        Self(inner)
-    }
-    pub fn create(device_init: &mut DeviceInit) -> NtResult<Self> {
+    pub fn create(device_init: &mut DeviceInit) -> NtResult<&Self> {
         let mut device: WDFDEVICE = WDF_NO_HANDLE.cast();
         let mut device_init_ptr: *mut WDFDEVICE_INIT = device_init.as_ptr_mut();
 
@@ -21,7 +18,7 @@ impl Device {
         ) };
 
         match status {
-            0 => Ok(Self(unsafe { device })),
+            0 => Ok(unsafe { &*(device as *const Self) }),
             status => Err(status.into()),
         }
     }
@@ -29,7 +26,7 @@ impl Device {
 
 impl WdfObject for Device {
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0 as WDFOBJECT
+        self as *const _ as WDFOBJECT
     }
 }
 

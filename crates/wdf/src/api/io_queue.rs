@@ -1,20 +1,16 @@
-use crate::api::{object::{WdfObject, WdfRc}, device::Device, error::{NtError, NtResult}, request::Request};
-use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT, _WDF_TRI_STATE};
+use crate::api::{object::WdfObject, device::Device, error::{NtError, NtResult}, request::Request};
+use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT};
 use wdf_macros::object_context;
 use paste::paste;
 
-pub struct IoQueue(WdfRc);
+pub struct IoQueue;
 
 impl IoQueue {
-    pub unsafe fn new(inner: WDFQUEUE) -> Self {
-        Self(unsafe { WdfRc::new(inner as *mut _) })
-    }
-
     pub fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as *mut _
+        self as *const IoQueue as WDFOBJECT 
     }
 
-    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
+    pub fn create<'a, 'b>(device: &'a Device, queue_config: &IoQueueConfig) -> NtResult<&'b mut Self> where 'a: 'b{
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
         let status = unsafe {
@@ -34,9 +30,9 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
-            let mut queue = unsafe { IoQueue::new(queue) };
+            let queue = unsafe { &mut *(queue as *mut IoQueue) };
 
-            RequestHandlers::attach(&mut queue, handlers)?;
+            RequestHandlers::attach(queue, handlers)?;
 
             Ok(queue)
         } else {
@@ -44,17 +40,18 @@ impl IoQueue {
         }
     }
 
-    pub fn get_device(&self) -> Device {
+    pub fn get_device(&self) -> &Device {
         unsafe {
             let device = call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
-            Device::new(device)
+            return &*(device as *const Device);
+            
         }
     }
 }
 
 impl WdfObject for IoQueue {
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as *mut _
+        self as *const IoQueue as *mut _
     }
 }
 
@@ -177,11 +174,11 @@ macro_rules! extern_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
-                let mut queue = unsafe { IoQueue::new(queue) };
+                let queue = unsafe { &mut *(queue as *mut IoQueue) };
                 let mut request = unsafe { Request::new(request) };
-                if let Some(handlers) = RequestHandlers::get(&queue) {
+                if let Some(handlers) = RequestHandlers::get(queue) {
                     if let Some(handler) = handlers.$handler_name {
-                        handler(&mut queue, request $(, $arg_name)*);
+                        handler(queue, request $(, $arg_name)*);
                         return;
                     }
                 }

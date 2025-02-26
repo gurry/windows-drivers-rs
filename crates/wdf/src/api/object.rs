@@ -1,4 +1,4 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFSPINLOCK, WDFOBJECT, WDF_OBJECT_ATTRIBUTES};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT};
 
 macro_rules! call_ref_func {
     ($func:ident, $obj:expr) => {
