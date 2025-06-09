@@ -20,6 +20,7 @@ impl_ref_counted_handle!(
 
 
 unsafe impl Send for IoQueue {}
+unsafe impl Sync for IoQueue {}
 
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {

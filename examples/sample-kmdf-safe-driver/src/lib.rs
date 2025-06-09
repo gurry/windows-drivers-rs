@@ -2,7 +2,7 @@
 #![allow(missing_docs)]
 
 use wdf::{
-    driver_entry, object_context, println, trace, CancellableMarkedRequest, Request,
+    driver_entry, object_context, println, CancellableMarkedRequest, Request,
     RequestCancellationToken, Device, DeviceInit, Driver, Guid, IoQueue,
     IoQueueConfig, NtError, NtStatus, SpinLock, Timer, TimerConfig
 };
@@ -20,6 +20,7 @@ struct QueueContext {
 #[object_context(Device)]
 struct DeviceContext {
     queue: SpinLock<Option<IoQueue>>,
+    second_queue: IoQueue,
 }
 
 #[driver_entry]
@@ -62,20 +63,16 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     QueueContext::attach(&mut queue, queue_context)?;
 
+
+    let second_queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
+
     let device_context = DeviceContext {
         queue: SpinLock::create(Some(queue))?,
+        second_queue,
     };
 
     DeviceContext::attach(&mut device, device_context)?;
 
-
-    // Create device interface
-    let _ = device.create_interface(
-        &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
-        None
-    )?; 
-
-    trace("Trace: Safe Rust device add complete");
     Ok(())
 }
 
@@ -97,7 +94,12 @@ fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
             }
         }
     } else {
-        println!("Failed to get queue context");
+        println!("Queue context not found, forwarding request to second queue");
+
+        let device = queue.get_device();
+        let device_context = DeviceContext::get(&device).unwrap();
+        let second_queue = &device_context.second_queue;
+        let _ = request.forward_to_queue(second_queue);
     }
 }
 

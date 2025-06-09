@@ -1,7 +1,7 @@
 use super::{error::NtStatus, io_queue::IoQueue, object::HandleType, NtResult};
-use crate::api::object::Handle;
+use crate::api::{object::Handle, error::NtError};
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST, NT_SUCCESS};
 
 #[derive(Debug)]
 #[repr(transparent)]
@@ -54,6 +54,22 @@ impl Request {
             IoQueue::new(queue)
         }
     }
+
+    pub fn forward_to_queue(self, queue: &IoQueue) -> NtResult<()> {
+        unsafe {
+            let status = call_unsafe_wdf_function_binding!(
+                WdfRequestForwardToIoQueue,
+                self.as_raw() as *mut _,
+                queue.as_raw() as *mut _
+            );
+
+            if NT_SUCCESS(status) {
+                Ok(())
+            } else {
+                Err(status.into())
+            }
+        }
+    }
 }
 
 impl Handle for Request {
@@ -103,6 +119,22 @@ impl CancellableMarkedRequest {
         };
 
         self.0.complete(status);
+    }
+
+    pub fn forward_to_queue(self, queue: &IoQueue) -> NtResult<()> {
+        unsafe {
+            let status = call_unsafe_wdf_function_binding!(
+                WdfRequestForwardToIoQueue,
+                self.as_raw() as *mut _,
+                queue.as_raw() as *mut _
+            );
+
+            if NT_SUCCESS(status) {
+                Ok(())
+            } else {
+                Err(status.into())
+            }
+        }
     }
 }
 
