@@ -2,6 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     error::NtResult,
     object::{wdf_struct_size, impl_ref_counted_handle, Handle, HandleType, init_attributes},
+    device::Device,
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
 use wdf_macros::primary_object_context;
@@ -92,6 +93,12 @@ impl Timer {
         } else {
             None
         }
+    }
+
+
+    pub fn get_device(&self) -> Device {
+        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
+        unsafe { Device::from_raw(parent as WDFOBJECT) }
     }
 }
 

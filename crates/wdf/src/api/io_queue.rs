@@ -18,6 +18,9 @@ impl_ref_counted_handle!(
     IoQueueContext
 );
 
+
+unsafe impl Send for IoQueue {}
+
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
         Self::from_raw(inner as WDFOBJECT)
