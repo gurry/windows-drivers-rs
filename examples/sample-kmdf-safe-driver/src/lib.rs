@@ -4,7 +4,7 @@
 use wdf::{
     driver_entry, object_context, println, CancellableMarkedRequest, Request,
     RequestCancellationToken, Device, DeviceInit, Driver, Guid, IoQueue,
-    IoQueueConfig, NtError, NtStatus, SpinLock, Timer, TimerConfig
+    IoQueueConfig, NtError, NtStatus, SpinLock, SpinLockGuard, Timer, TimerConfig
 };
 
 use core::time::Duration;
@@ -126,6 +126,15 @@ fn evt_timer(timer: &mut Timer) {
 
     let device = timer.get_device();
     let device_context = DeviceContext::get(&device).unwrap();
+
+
+    // THIS CODE MIGHT CAUSE A DEADLOCK
+    // let queue: SpinLockGuard<'_, Option<IoQueue>> = device_context.queue.lock();
+    // if Some(queue) = queue.as_ref() {
+    //     queue.some_method(); // calling into the driver with a lock held!!!
+    //     //...
+    // }
+
 
     let req = {
         let queue = device_context.queue.lock();
