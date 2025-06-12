@@ -126,17 +126,22 @@ fn evt_timer(timer: &mut Timer) {
 
     let device = timer.get_device();
     let device_context = DeviceContext::get(&device).unwrap();
-    let queue = device_context.queue.lock();
-    if let Some(queue) = queue.as_ref() {
-        let queue_context = QueueContext::get(queue).unwrap();
 
-        let req = queue_context.request.lock().take();
-        if let Some(req) = req {
-            req.complete(NtStatus::Success);
-            println!("Request completed");
+    let req = {
+        let queue = device_context.queue.lock();
+        if let Some(queue) = queue.as_ref() {
+            let queue_context = QueueContext::get(queue).unwrap();
+            queue_context.request.lock().take()
         } else {
-            println!("Request already cancelled or completed");
+            None
         }
+    };
+
+    if let Some(req) = req {
+        req.complete(NtStatus::Success);
+        println!("Request completed");
+    } else {
+        println!("Request already cancelled or completed");
     }
 
     timer.stop(false);
