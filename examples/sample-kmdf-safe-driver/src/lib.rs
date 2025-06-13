@@ -131,7 +131,7 @@ fn evt_timer(timer: &mut Timer) {
     // THIS CODE MIGHT CAUSE A DEADLOCK
     // let queue: SpinLockGuard<'_, Option<IoQueue>> = device_context.queue.lock();
     // if Some(queue) = queue.as_ref() {
-    //     queue.some_method(); // calling into the driver with a lock held!!!
+    //     queue.some_method(); // calling out of the driver with a lock held!!!
     //     //...
     // }
 
