@@ -73,7 +73,12 @@ fn test_project_creation(driver_type: &str) {
     });
 }
 
-fn test_invocation<F: FnOnce(&str, &str)>(args: &[&str], add_path_arg: bool, command_succeeds: bool, assert: F) {
+fn test_invocation<F: FnOnce(&str, &str)>(
+    args: &[&str],
+    add_path_arg: bool,
+    command_succeeds: bool,
+    assert: F,
+) {
     with_file_lock(|| {
         let mut args = args
             .into_iter()
@@ -93,7 +98,11 @@ fn test_invocation<F: FnOnce(&str, &str)>(args: &[&str], add_path_arg: bool, com
         cmd.args(args);
 
         let cmd_assertion = cmd.assert();
-        let cmd_assertion = if command_succeeds { cmd_assertion.success() } else { cmd_assertion.failure() };
+        let cmd_assertion = if command_succeeds {
+            cmd_assertion.success()
+        } else {
+            cmd_assertion.failure()
+        };
         let output = cmd_assertion.get_output();
         let stdout = String::from_utf8_lossy(&output.stdout);
         println!("stdout: {stdout}");

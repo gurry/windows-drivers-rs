@@ -14,7 +14,12 @@ use wdk_build::CpuArchitecture;
 use crate::actions::{
     build::{BuildAction, BuildActionParams},
     new::NewAction,
-    DriverType, Profile, TargetArch, KMDF_STR, UMDF_STR, WDM_STR,
+    DriverType,
+    Profile,
+    TargetArch,
+    KMDF_STR,
+    UMDF_STR,
+    WDM_STR,
 };
 #[double]
 use crate::providers::{exec::CommandExec, fs::Fs, metadata::Metadata, wdk_build::WdkBuild};
@@ -274,10 +279,10 @@ mod tests {
                 result.err().unwrap().to_string(),
                 format!(
                     "Unsupported default target: {}. Only x86_64-pc-windows-msvc and \
-                    aarch64-pc-windows-msvc are supported.\n Make sure you're on Windows and switch \
-                    the default target to one of the above two using `rustup.exe`. You can also use \
-                    the --target-arch option to explicitly specify a CPU architecture instead of \
-                    relying on the default target.",
+                     aarch64-pc-windows-msvc are supported.\n Make sure you're on Windows and \
+                     switch the default target to one of the above two using `rustup.exe`. You \
+                     can also use the --target-arch option to explicitly specify a CPU \
+                     architecture instead of relying on the default target.",
                     toolchain
                 )
             );
@@ -300,7 +305,7 @@ mod tests {
         assert_eq!(
             result.err().unwrap().to_string(),
             "Unable to read rustc host tuple: Command 'rustc' with args [\"--print\", \
-                 \"host-tuple\"] failed \n STDOUT: command error",
+             \"host-tuple\"] failed \n STDOUT: command error",
         );
     }
 
