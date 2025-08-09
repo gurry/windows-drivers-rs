@@ -8,6 +8,7 @@
 //! validating, verifying and generating artefacts for the driver package.
 
 use std::{
+    io::{self, BufRead, BufReader, Read},
     ops::RangeFrom,
     path::{Path, PathBuf},
     result::Result,
@@ -34,7 +35,6 @@ pub struct PackageTaskParams<'a> {
     pub target_dir: &'a Path,
     pub target_arch: &'a CpuArchitecture,
     pub verify_signature: bool,
-    pub sample_class: bool,
     pub driver_model: DriverConfig,
 }
 
@@ -42,7 +42,6 @@ pub struct PackageTaskParams<'a> {
 pub struct PackageTask<'a> {
     package_name: String,
     verify_signature: bool,
-    sample_class: bool,
 
     // src paths
     src_inx_file_path: PathBuf,
@@ -138,7 +137,6 @@ impl<'a> PackageTask<'a> {
         Ok(Self {
             package_name,
             verify_signature: params.verify_signature,
-            sample_class: params.sample_class,
             src_inx_file_path,
             src_driver_binary_file_path,
             src_renamed_driver_binary_file_path,
@@ -456,7 +454,11 @@ impl<'a> PackageTask<'a> {
 
     fn run_infverif(&self) -> Result<(), PackageTaskError> {
         info!("Running infverif command.");
-        let additional_args = if self.sample_class {
+        
+        // Detect if this is a sample driver by parsing the .inx file
+        let is_sample_driver = Self::inx_has_sample_class(&self.src_inx_file_path, self.fs)?;
+        
+        let additional_args = if is_sample_driver {
             let wdk_build_number = self.wdk_build.detect_wdk_build_number()?;
             if MISSING_SAMPLE_FLAG_WDK_BUILD_NUMBER_RANGE.contains(&wdk_build_number) {
                 debug!(
@@ -481,7 +483,7 @@ impl<'a> PackageTask<'a> {
         ];
         let inf_path = self.dest_inf_file_path.to_string_lossy();
 
-        if self.sample_class {
+        if is_sample_driver {
             args.push(additional_args);
         }
         args.push(&inf_path);
@@ -491,5 +493,286 @@ impl<'a> PackageTask<'a> {
         }
 
         Ok(())
+    }
+
+    /// Detects if a driver is a sample class driver by parsing the .inx file
+    /// and looking for "Class=Sample" value under the "[Version]" section.
+    pub fn inx_has_sample_class(inx_path: &Path, fs: &Fs) -> Result<bool, PackageTaskError> {
+        debug!("Detecting sample class from .inx file: {}", inx_path.display());
+        
+        let file = fs.open_reader(inx_path)
+            .map_err(|e| PackageTaskError::FileIo(e))?;
+
+        Self::reader_has_sample_class(file)
+            .map_err(|e| PackageTaskError::FileIo(FileError::ReadError(inx_path.to_owned(), e)))
+    }
+
+    /// Parses INX file content to detect if it contains "Class=Sample" under
+    /// the "[Version]" section.
+    /// 
+    /// This function has been extracted out for testability.
+    fn reader_has_sample_class<R: Read>(reader: R) -> Result<bool, io::Error> {
+        let buf_reader = BufReader::with_capacity(512, reader);
+        let mut in_version_section = false;
+        
+        for line in buf_reader.lines() {
+            let line = line?;
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with(';') {
+                continue;
+            }
+            
+            // Check for [Version] section (case-insensitive)
+            if trimmed.to_lowercase() == "[version]" {
+                in_version_section = true;
+                debug!("Found [Version] section");
+                continue;
+            }
+            
+            // Check if we've moved to a different section
+            if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.to_lowercase() != "[version]" {
+                if in_version_section {
+                    debug!("Left [Version] section, entering: {}", trimmed);
+                }
+                in_version_section = false;
+                continue;
+            }
+            
+            // If we're in the [Version] section, look for Class=Sample
+            if in_version_section && trimmed.contains('=') {
+                let parts: Vec<&str> = trimmed.splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    let key = parts[0].trim();
+                    let value = parts[1].trim();
+                    
+                    // Case-insensitive check for "Class" and "Sample"
+                    if key.to_lowercase() == "class" && value.to_lowercase() == "sample" {
+                        debug!("Found Class=Sample in [Version] section");
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        
+        debug!("Did not find Class=Sample in [Version] section");
+        Ok(false)
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod reader_has_sample_class {
+        use std::result::Result;
+        use super::*;
+
+        #[test]
+        fn for_inx_containing_sample_class_returns_true() {
+            const SAMPLE_CLASS_INX_FILES: &[&str] = &[
+                // Basic sample class
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+ClassGuid   = {78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider    = %ProviderString%"#,
+                
+                // Case insensitive
+                r#"[version]
+Signature   = "$WINDOWS NT$"
+CLASS       = SAMPLE
+Provider    = %ProviderString%"#,
+                
+                // With whitespace
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+  Class   =   Sample  
+Provider    = %ProviderString%"#,
+                
+                // With comments and empty lines
+                r#"; This is a comment
+[Version]
+; Another comment
+Signature   = "$WINDOWS NT$"
+
+Class       = Sample
+; Final comment
+Provider    = %ProviderString%"#,
+                
+                // Multiple sections - only check Version section
+                r#"[SomeOtherSection]
+Class = NotSample
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+Provider    = %ProviderString%
+
+[AnotherSection]
+Class = AlsoNotSample"#,
+                
+                // Complex real-world example
+                r#";===================================================================
+; Sample KMDF Driver
+; Copyright (c) Microsoft Corporation
+;===================================================================
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+ClassGuid   = {78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider    = %ProviderString%
+PnpLockDown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskId1%,,,""
+
+[SourceDisksFiles]
+sample_kmdf_driver.sys = 1,,"#,
+            ];
+
+            for (i, content) in SAMPLE_CLASS_INX_FILES.iter().enumerate() {
+                run_test(content, i, Ok(true));
+            }
+        }
+
+        #[test]
+        fn for_inx_not_containing_sample_class_returns_false() {
+            const NON_SAMPLE_CLASS_CONTENT: &[&str] = &[
+                // Different class name
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Custom Sample Device Class
+ClassGuid   = {C5D55F57-9A34-4E34-B1A0-8A10BDE938D6}
+Provider    = %ManufacturerName%"#,
+                
+                // No version section
+                r#"[SomeSection]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+Provider    = %ProviderString%"#,
+                
+                // No class in version
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Provider    = %ProviderString%"#,
+                
+                // Empty content
+                "",
+                
+                // Only comments
+                r#";Only comments
+; No actual content
+; Just comments everywhere"#,
+                
+                // Class without value
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class =
+Provider    = %ProviderString%"#,
+                
+                // Class with 'Sample' as substring but not exact match
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class = SampleDevice
+Provider    = %ProviderString%"#,
+                
+                // Complex non-sample example
+                r#";
+; kmdf_driver.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Custom Sample Device Class
+ClassGuid   = {C5D55F57-9A34-4E34-B1A0-8A10BDE938D6}
+Provider    = %ManufacturerName%
+CatalogFile = kmdf_driver.cat
+DriverVer   = ; TODO: set DriverVer in stampinf property pages
+PnpLockdown = 1"#,
+            ];
+
+            for (i, content) in NON_SAMPLE_CLASS_CONTENT.iter().enumerate() {
+                run_test(content, i, Ok(false));
+            }
+        }
+
+        #[test]
+        fn for_malformed_inx_returns_false() {
+            const MALFORMED_CONTENT: &[&str] = &[
+                // Malformed key-value but valid Class=Sample later
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class
+Provider    = %ProviderString%
+Class = Sample"#,
+                
+                // Multiple equals signs (should not match because value becomes "Sample = Extra")
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class = Sample = Extra
+Provider    = %ProviderString%"#,
+                
+                // Nested brackets (malformed but should still parse)
+                r#"[Version]
+Signature   = "$WINDOWS NT$"
+Class = Sample
+[Nested]
+Provider    = %ProviderString%"#,
+                
+                // Missing closing bracket
+                r#"[Version
+Signature   = "$WINDOWS NT$"
+Class = Sample
+Provider    = %ProviderString%"#,
+                
+                // Multiple Version sections (should use first one)
+                r#"[Version]
+Class = Sample
+
+[Version]
+Class = NotSample"#,
+            ];
+
+            // For malformed content, we expect specific behaviors:
+            let expected_results = [
+                true,  // Should find valid Class=Sample despite malformed line
+                false, // Multiple equals should not match
+                true,  // Should still find Class=Sample despite nested section
+                true,  // Should still find Class=Sample despite malformed section
+                true,  // Should use first Version section
+            ];
+
+            for (i, (content, expected)) in MALFORMED_CONTENT.iter().zip(expected_results.iter()).enumerate() {
+                run_test(content, i, Ok(*expected));
+            }
+        }
+
+        fn run_test(content: &str, i: usize, expected: Result<bool, io::Error>) {
+            let reader = std::io::Cursor::new(content.as_bytes());
+            let result = PackageTask::reader_has_sample_class(reader);
+            assert!(
+                are_eq(&result, &expected),
+                "Expected {:?}, got {:?}. Test case: {}, content:\n{}",
+                expected,
+                result,
+                i,
+                content
+            );
+
+            fn are_eq(res1: &Result<bool, io::Error>, res2: &Result<bool, io::Error>) -> bool {
+                match (res1, res2) {
+                    (Ok(v1), Ok(v2)) => v1 == v2,
+                    (Err(e1), Err(e2)) => e1.kind() == e2.kind() && e1.to_string() == e2.to_string(),
+                    _ => false,
+                }
+            }
+        }
     }
 }

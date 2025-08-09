@@ -86,4 +86,12 @@ impl Fs {
             .map_err(|e| FileError::WriteError(path.to_owned(), e))?;
         Ok(())
     }
+
+    pub fn open_reader(&self, path: &Path) -> Result<Box<dyn Read>, FileError> {
+        if !path.exists() {
+            return Err(FileError::NotFound(path.to_owned()));
+        }
+        let file = File::open(path).map_err(|e| FileError::OpenError(path.to_owned(), e))?;
+        Ok(Box::new(file))
+    }
 }

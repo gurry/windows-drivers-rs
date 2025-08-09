@@ -35,7 +35,6 @@ pub struct BuildActionParams<'a> {
     pub profile: Option<&'a Profile>,
     pub target_arch: TargetArch,
     pub verify_signature: bool,
-    pub is_sample_class: bool,
     pub verbosity_level: clap_verbosity_flag::Verbosity,
 }
 
@@ -46,7 +45,6 @@ pub struct BuildAction<'a> {
     profile: Option<&'a Profile>,
     target_arch: TargetArch,
     verify_signature: bool,
-    is_sample_class: bool,
     verbosity_level: clap_verbosity_flag::Verbosity,
 
     // Injected deps
@@ -85,7 +83,6 @@ impl<'a> BuildAction<'a> {
             profile: params.profile,
             target_arch: params.target_arch,
             verify_signature: params.verify_signature,
-            is_sample_class: params.is_sample_class,
             verbosity_level: params.verbosity_level,
             wdk_build,
             command_exec,
@@ -419,7 +416,6 @@ impl<'a> BuildAction<'a> {
                 target_dir: &target_dir,
                 target_arch: &target_arch,
                 verify_signature: self.verify_signature,
-                sample_class: self.is_sample_class,
                 driver_model,
             },
             self.wdk_build,

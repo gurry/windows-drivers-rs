@@ -93,10 +93,6 @@ pub struct BuildArgs {
     /// Verify the signature
     #[arg(long)]
     pub verify_signature: bool,
-
-    /// Build Sample Class Driver Project
-    #[arg(long)]
-    pub sample: bool,
 }
 
 /// Subcommands
@@ -164,7 +160,6 @@ impl Cli {
                         profile: cli_args.profile.as_ref(),
                         target_arch,
                         verify_signature: cli_args.verify_signature,
-                        is_sample_class: cli_args.sample,
                         verbosity_level: self.verbose,
                     },
                     &wdk_build,
