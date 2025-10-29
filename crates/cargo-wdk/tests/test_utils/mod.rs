@@ -3,7 +3,7 @@
 //! subdirectory prevents Cargo from treating this as an independent integration
 //! test crate and instead lets other tests import it as a regular module.
 
-use std::{collections::HashMap, env, ffi::OsStr, path::Path, process::Command, vec};
+use std::{collections::HashMap, env, ffi::OsStr, path::Path, process::Command};
 
 use assert_cmd::cargo::CommandCargoExt;
 use fs4::fs_std::FileExt;
