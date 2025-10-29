@@ -252,7 +252,7 @@ fn sanitize_env_vars(cmd: &mut Command) {
             || path.ends_with("target/llvm-cov-target/release/deps")
             || path
                 .to_string_lossy()
-                .replace("\\", "/")
+                .replace('\\', "/")
                 .contains(".rustup/toolchain"))
     });
 
