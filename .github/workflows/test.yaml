@@ -101,7 +101,7 @@ jobs:
         run: echo ${{ github.ref_name }}
 
       - name: Upload Coverage to Codecov
-        if: matrix.runner.arch != 'arm64'
+        if: matrix.runner.arch != 'arm64' && github.repository == 'microsoft/windows-drivers-rs' # Upload only from the main repo not forks 
         uses: codecov/codecov-action@v5
         with:
           files: target/codecov.info
