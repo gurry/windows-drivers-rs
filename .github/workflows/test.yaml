@@ -94,6 +94,9 @@ jobs:
         if: matrix.runner.arch != 'arm64'
         run: cargo +${{ matrix.rust_toolchain }} llvm-cov --workspace --codecov --output-path target/codecov.info --locked --profile ${{ matrix.cargo_profile }} --all-features
 
+      - name: Print current branch
+        run: echo ${{ github.ref_name }}
+
       - name: Upload Coverage to Codecov
         if: matrix.runner.arch != 'arm64'
         uses: codecov/codecov-action@v5
