@@ -222,6 +222,8 @@ If you understand these implications, and have installed the test certificate, t
 cargo make --env WDK_BUILD_ENABLE_SIGNTOOL_VERIFY=true
 ```
 
+test
+
 ## Contact
 
 * For bug reports, feature requests, and other actionable items, please use [GitHub Issues](https://github.com/microsoft/windows-drivers-rs/issues)
