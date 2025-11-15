@@ -55,6 +55,7 @@ pub struct NewArgs {
     pub path: Option<PathBuf>,
 }
 
+// NewArgs impl
 impl NewArgs {
     /// Returns the variant of `DriverType` based on which of the `driver_type`
     /// flags, `--kmdf`, `--umdf` or `--wdm` was passed to the `new` command.
