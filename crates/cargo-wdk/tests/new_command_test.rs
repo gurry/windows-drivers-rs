@@ -66,6 +66,11 @@ fn project_is_created(driver_type: &str) {
         // Build the driver only if SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS is not set.
         // This env var is used in release-plz PRs, wherein it is set to skip the driver
         //  build because it would fail due to not yet released dependencies
+        println!("===> Dumping env vars");
+        for (key, value) in std::env::vars() {
+            println!("{}={}", key, value);
+        }
+
         if std::env::var("SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS").unwrap_or_default() == "1" {
             println!(
                 "Skipping driver build due to SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS environment \
@@ -78,6 +83,7 @@ fn project_is_created(driver_type: &str) {
 }
 
 fn verify_project_creation(driver_type: &str, tmp_dir: &TempDir) -> PathBuf {
+    println!("Verifying project creation for driver type: {driver_type}");
     let driver_name = format!("test-{driver_type}-driver");
     let driver_name_underscored = driver_name.replace('-', "_");
     let driver_path = tmp_dir.join(&driver_name);
@@ -162,6 +168,7 @@ fn verify_project_creation(driver_type: &str, tmp_dir: &TempDir) -> PathBuf {
 }
 
 fn verify_driver_build(driver_path: &PathBuf) {
+    println!("Verifying driver build for path: {}", driver_path.display());
     // assert if cargo wdk build works on the created driver project
     set_crt_static_flag();
 
