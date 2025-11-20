@@ -89,4 +89,9 @@ jobs:
       - name: Test wdk-pre-commit-flow cargo-make task
         env:
           SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS: ${{ startsWith(github.head_ref, 'release-plz-') && '1' || '' }}
-        run: cargo make wdk-pre-commit-flow
+        run: |
+          Write-Host "github.ref_name: ${{ github.ref_name }}"
+          Write-Host "github.head_ref: ${{ github.head_ref }}"
+          Write-Host "startsWith(github.head_ref, 'release-plz-'): ${{ startsWith(github.head_ref, 'release-plz-') }}"
+          Write-Host "SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS: $env:SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS" 
+          cargo make wdk-pre-commit-flow
