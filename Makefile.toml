@@ -11,6 +11,7 @@ CARGO_MAKE_CLIPPY_ARGS = "--all-targets --all-features"
 CARGO_MAKE_RUST_DEFAULT_TOOLCHAIN = "stable"
 RUSTFLAGS = "-D warnings"
 RUSTDOCFLAGS = "-D warnings"
+RUST_TEST_NOCAPTURE = "1" # Equivalent to passing `-- --nocapture` to `cargo test`
 
 [tasks.wdk-pre-commit-flow]
 description = "Run pre-commit tasks and checks"
