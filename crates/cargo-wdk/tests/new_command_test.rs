@@ -66,11 +66,6 @@ fn project_is_created(driver_type: &str) {
         // Build the driver only if SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS is not set.
         // This env var is used in release-plz PRs, wherein it is set to skip the driver
         //  build because it would fail due to not yet released dependencies
-        println!("===> Dumping env vars");
-        for (key, value) in std::env::vars() {
-            println!("{}={}", key, value);
-        }
-
         if std::env::var("SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS").unwrap_or_default() == "1" {
             println!(
                 "Skipping driver build due to SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS environment \
@@ -182,7 +177,6 @@ fn verify_driver_build(driver_path: &PathBuf) {
     // Assert build output contains expected errors (the INF file is intentionally
     // incomplete)
 
-    println!("stdout: {stdout}");
     assert!(
         stdout.contains(
             "Required directive Provider missing, empty, or invalid in [Version] section."

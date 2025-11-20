@@ -90,12 +90,7 @@ jobs:
       - name: Run Cargo Test (workspace)
         env:
           SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS: ${{ startsWith(github.head_ref, 'release-plz-') && '1' || '' }}
-        run: |
-          # Write-Host "github.ref_name: ${{ github.ref_name }}"
-          # Write-Host "github.head_ref: ${{ github.head_ref }}"
-          # Write-Host "startsWith(github.head_ref, 'release-plz-'): ${{ startsWith(github.head_ref, 'release-plz-') }}"
-          # Write-Host "SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS: $env:SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS" 
-          cargo +${{ matrix.rust_toolchain }} test --locked --profile ${{ matrix.cargo_profile }} --all-features -- --no-capture
+        run: cargo +${{ matrix.rust_toolchain }} test --locked --profile ${{ matrix.cargo_profile }} --all-features -- --no-capture
 
       - name: Run Cargo Test (Top-Level tests Folder via Cargo Make)
         run: cargo +${{ matrix.rust_toolchain }} make --cwd ./tests test --locked --profile ${{ matrix.cargo_profile }}
