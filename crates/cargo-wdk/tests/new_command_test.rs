@@ -181,6 +181,8 @@ fn verify_driver_build(driver_path: &PathBuf) {
 
     // Assert build output contains expected errors (the INF file is intentionally
     // incomplete)
+
+    println!("stdout: {stdout}");
     assert!(
         stdout.contains(
             "Required directive Provider missing, empty, or invalid in [Version] section."
