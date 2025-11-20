@@ -68,7 +68,7 @@ fn project_is_created(driver_type: &str) {
         //  build because it would fail due to not yet released dependencies
         println!("===> Dumping env vars");
         for (key, value) in std::env::vars() {
-            println!("{}={}", key, value);
+            println!("{key}={value}");
         }
 
         if std::env::var("SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS").unwrap_or_default() == "1" {
