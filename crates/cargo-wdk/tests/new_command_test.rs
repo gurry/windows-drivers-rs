@@ -66,6 +66,7 @@ fn project_is_created(driver_type: &str) {
         // Build the driver only if SKIP_BUILD_IN_CARGO_WDK_NEW_TESTS is not set.
         // This env var is used in release-plz PRs, wherein it is set to skip the driver
         //  build because it would fail due to not yet released dependencies
+        // dummy comment
         println!("===> Dumping env vars");
         for (key, value) in std::env::vars() {
             println!("{key}={value}");
