@@ -1,4 +1,4 @@
-use core::{mem, ptr, sync::atomic::AtomicUsize};
+use core::{mem, ptr, sync::atomic::AtomicIsize};
 
 use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
@@ -72,7 +72,7 @@ impl UsbDevice {
         }
         .and_then(|| {
             let ctxt = UsbDeviceContext {
-                ref_count: AtomicUsize::new(0),
+                ref_count: AtomicIsize::new(0),
             };
 
             UsbDeviceContext::attach(unsafe { &*(usb_device.cast()) }, ctxt)?;
@@ -225,7 +225,7 @@ impl GetDevice for UsbDevice {
 
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
-    ref_count: AtomicUsize,
+    ref_count: AtomicIsize,
 }
 
 pub struct UsbDeviceCreateConfig {

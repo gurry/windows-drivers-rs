@@ -2,7 +2,7 @@ use alloc::string::String;
 use core::{
     marker::PhantomData,
     ptr,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicIsize, Ordering},
 };
 
 use wdk_sys::{
@@ -27,7 +27,7 @@ pub trait Handle {
 }
 
 pub trait RefCountedHandle: Handle {
-    fn get_ref_count(&self) -> &AtomicUsize;
+    fn get_ref_count(&self) -> &AtomicIsize;
 }
 
 macro_rules! impl_handle {
@@ -65,7 +65,7 @@ macro_rules! impl_ref_counted_handle {
         crate::api::object::impl_handle!($obj);
 
         impl crate::api::object::RefCountedHandle for $obj {
-            fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
+            fn get_ref_count(&self) -> &core::sync::atomic::AtomicIsize {
                 let inner_context = <$inner_context>::get(self);
                 &inner_context.ref_count
             }
@@ -331,8 +331,8 @@ pub(crate) fn bug_check_if_ref_count_not_zero<H: RefCountedHandle, C: ObjectCont
 ) {
     let handle = unsafe { &*obj.cast::<H>() };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
-    if ref_count > 0 {
-        bug_check(0xDEADDEAD, obj, Some(ref_count));
+    if ref_count != 0 {
+        bug_check(0xDEADDEAD, obj, Some(ref_count as usize));
     }
 }
 

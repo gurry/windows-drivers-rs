@@ -1,4 +1,4 @@
-use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
+use core::{ptr::null_mut, sync::atomic::AtomicIsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{WDF_TIMER_CONFIG, WDFDEVICE, WDFTIMER, call_unsafe_wdf_function_binding};
@@ -22,7 +22,7 @@ impl_ref_counted_handle!(Timer, TimerContext);
 impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Arc<Self>> {
         let context = TimerContext {
-            ref_count: AtomicUsize::new(0),
+            ref_count: AtomicIsize::new(0),
             evt_timer_func: config.evt_timer_func,
         };
 
@@ -138,7 +138,7 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 
 #[object_context_with_ref_count_check(Timer)]
 struct TimerContext {
-    ref_count: AtomicUsize,
+    ref_count: AtomicIsize,
     evt_timer_func: fn(&Timer),
 }
 

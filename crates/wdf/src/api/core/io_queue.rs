@@ -1,4 +1,4 @@
-use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::AtomicIsize;
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk::nt_success;
@@ -41,7 +41,7 @@ impl IoQueue {
         }
         .and_then(|| {
             let ctxt = IoQueueContext {
-                ref_count: AtomicUsize::new(0),
+                ref_count: AtomicIsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
                 evt_io_write: queue_config.evt_io_write,
@@ -208,7 +208,7 @@ impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
 
 #[object_context_with_ref_count_check(IoQueue)]
 struct IoQueueContext {
-    ref_count: AtomicUsize,
+    ref_count: AtomicIsize,
     evt_io_default: Option<fn(&IoQueue, Request)>,
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&IoQueue, Request, usize)>,
