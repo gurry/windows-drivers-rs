@@ -7,7 +7,6 @@ use wdk_sys::{
     WDF_IO_QUEUE_CONFIG,
     WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_NO_OBJECT_ATTRIBUTES,
-    WDFDEVICE,
     WDFQUEUE,
     WDFREQUEST,
     call_unsafe_wdf_function_binding,
@@ -17,7 +16,7 @@ use super::{
     TriState,
     device::Device,
     init_wdf_struct,
-    object::{GetDevice, Handle, impl_ref_counted_handle},
+    object::{Handle, impl_ref_counted_handle},
     request::{Request, RequestId, RequestStopActionFlags},
     result::{NtResult, NtStatusError, StatusCodeExt, status_codes},
     sync::Arc,
@@ -58,7 +57,11 @@ impl IoQueue {
     }
 
     pub fn get_device(&self) -> &Device {
-        self.get_device_safely()
+        let device_ptr = unsafe {
+            call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast())
+        };
+
+        unsafe { &*(device_ptr.cast::<Device>()) }
     }
 
     pub fn start(&self) {
@@ -94,12 +97,6 @@ impl IoQueue {
         } else {
             Err(NtStatusError::from(status))
         }
-    }
-}
-
-impl GetDevice for IoQueue {
-    fn get_device_ptr(&self) -> WDFDEVICE {
-        unsafe { call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast()) }
     }
 }
 
