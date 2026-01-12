@@ -1,6 +1,6 @@
 use core::{
     default::Default,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicIsize, Ordering},
 };
 
 use wdf_macros::object_context_with_ref_count_check;
@@ -78,7 +78,7 @@ impl Device {
             DeviceContext::attach(
                 device,
                 DeviceContext {
-                    ref_count: AtomicUsize::new(0),
+                    ref_count: AtomicIsize::new(0),
                     is_operational: AtomicBool::new(false),
                     pnp_power_callbacks,
                 },
@@ -328,7 +328,7 @@ impl Default for DevicePnpCapabilities {
 
 #[object_context_with_ref_count_check(Device)]
 struct DeviceContext {
-    ref_count: AtomicUsize,
+    ref_count: AtomicIsize,
     is_operational: AtomicBool, // Is true if device is in D0 or higher power state
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }

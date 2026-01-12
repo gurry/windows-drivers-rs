@@ -3,17 +3,16 @@ use core::{
     cell::UnsafeCell,
     ffi::c_void,
     marker::PhantomData,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     ptr::NonNull,
-    sync::atomic::{AtomicUsize, Ordering, fence},
+    sync::atomic::{AtomicIsize, AtomicUsize, Ordering, fence},
 };
 
 use wdk::println;
 use wdk_sys::{WDFOBJECT, WDFSPINLOCK, call_unsafe_wdf_function_binding};
 
 use super::{
-    device::Device,
-    object::{GetDevice, Handle, RefCountedHandle, bug_check, init_attributes},
+    object::{Handle, RefCountedHandle, bug_check, init_attributes},
     result::{NtResult, StatusCodeExt},
 };
 
@@ -130,10 +129,17 @@ pub struct Arc<T: RefCountedHandle> {
 }
 
 impl<T: RefCountedHandle> Arc<T> {
-    /// Creates a new `Arc` from a raw WDF object pointer
+    /// Creates a new `Arc` from a raw WDF object pointer and
+    /// increments the ref count by 1.
+    ///
     /// # Safety
-    /// `ptr` must be a valid WDF object pointer that implements
+    ///
+    /// The following requirements must be met:
+    /// - `ptr` must be non-null
+    /// - `ptr` must be a valid WDF object pointer that implements
     /// `RefCountedHandle`.
+    /// - The ref count of the object pointed to by `ptr` must be 0
+    /// (`from_raw` will increment it to 1)
     pub(crate) unsafe fn from_raw(ptr: WDFOBJECT) -> Self {
         let obj = unsafe { &*ptr.cast::<T>() };
         let ref_count = obj.get_ref_count();
@@ -146,11 +152,23 @@ impl<T: RefCountedHandle> Arc<T> {
         // alive thanks to this very ref count increment.
         // Here we also prevent the ref count from overflowing by bugchecking
         // early because an overflow would lead to all kinds of unsafety.
-        if ref_count.fetch_add(1, Ordering::Relaxed) > usize::MAX / 2 {
+        if ref_count.fetch_add(1, Ordering::Relaxed) > isize::MAX / 2 {
             let ref_count = ref_count.load(Ordering::Relaxed);
-            bug_check(0xDEADDEAD, ptr, Some(ref_count));
+            bug_check(0xDEADDEAD, ptr, Some(ref_count as usize));
         }
 
+        unsafe { Self::from_raw_no_inc(ptr) }
+    }
+
+    /// Creates a new `Arc` from a raw WDF object pointer.
+    /// Does not increment the ref count.
+    ///
+    /// # Safety
+    ///
+    /// The following requirements must be met:
+    /// - `ptr` must be non-null
+    /// - `ptr` must be a valid WDF object pointer
+    unsafe fn from_raw_no_inc(ptr: WDFOBJECT) -> Self {
         // SAFETY: the incoming `ptr` is required to be non-null
         // by the safety contract of `from_raw`
         let ptr = unsafe { NonNull::new_unchecked(ptr) };
@@ -162,35 +180,26 @@ impl<T: RefCountedHandle> Arc<T> {
     }
 
     /// Returns a mutable reference to the inner value
-    ///
-    /// A mutable reference to the inner value is returned only
-    /// if the `Device` associated with `T` is in on operational
-    /// state (i.e. D0 power state or higher)
-    ///
-    /// # Panics
-    /// Panics if the `Device` associated with `T` is operational
-    pub fn get_mut(&mut self) -> &mut T
-    where
-        T: GetDevice,
-    {
-        let device_ptr = self.get_device_ptr();
+    pub fn get_mut(&mut self) -> Option<RefMut<'_, T>> {
+        let ref_count = self.get_ref_count();
 
-        if unsafe { Device::is_operational(device_ptr) } {
-            // When the device is operational its callbacks
-            // are running and they receive their arguments
-            // as normal references `&T` not as `Arc<T>`.
-            // Therefore even if the `Arc<T>` ref count is 1,
-            // during this state other kinds of references
-            // may still be active and it's unsafe to return
-            // an exclusive reference to `T`.
-            panic!(
-                "Cannot get mutable reference to {} because the associated device is in \
-                 operational state",
-                T::type_name()
-            );
+        // Attempt 1 → -1 transition
+        if ref_count
+            .compare_exchange(1, -1, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Some(RefMut {
+                value: unsafe { &mut *self.as_ptr().cast::<T>() },
+            })
+        } else {
+            None
         }
+    }
 
-        unsafe { &mut *self.as_ptr().cast::<T>() }
+    #[inline(always)]
+    fn get_ref_count(&self) -> &AtomicIsize {
+        let obj = unsafe { &*self.as_ptr().cast::<T>() };
+        obj.get_ref_count()
     }
 }
 
@@ -202,8 +211,7 @@ impl<T: RefCountedHandle> Clone for Arc<T> {
 
 impl<T: RefCountedHandle> Drop for Arc<T> {
     fn drop(&mut self) {
-        let obj = unsafe { &*self.as_ptr().cast::<T>() };
-        let ref_count = obj.get_ref_count();
+        let ref_count = self.get_ref_count();
 
         println!(
             "Drop {}: Ref count {}",
@@ -221,7 +229,8 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         // ref count reaches zero. Therefore as an optimization we
         // use only the Release ordering in fetch_sub and have a
         // separate Acquire fence inside the if block.
-        if ref_count.fetch_sub(1, Ordering::Release) == 1 {
+        let prev = ref_count.fetch_sub(1, Ordering::Release);
+        if prev == 1 {
             fence(Ordering::Acquire);
 
             println!("Drop {}: Ref count 0. Deleting obj", Self::type_name());
@@ -231,6 +240,9 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
             unsafe {
                 call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr());
             }
+        } else if prev < 1 {
+            // Ref count went negative, which is a bug
+            bug_check(0xDEADDEAD, self.as_ptr(), Some(prev as usize - 1));
         }
     }
 }
@@ -267,6 +279,92 @@ unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
 /// `Arc<T>` being `Send` requires `T` to be both `Send`
 /// and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
+
+/// A mutable reference guard returned by `Arc::get_mut`
+pub struct RefMut<'a, T: RefCountedHandle> {
+    value: &'a mut T,
+}
+
+impl<T: RefCountedHandle> Drop for RefMut<'_, T> {
+    fn drop(&mut self) {
+        let ref_count = self.value.get_ref_count();
+
+        // Release ordering for the next Arc::get_mut()
+        // and Opaque::upgrade() to synchronize with
+        let prev = ref_count.swap(1, Ordering::Release);
+
+        if prev != -1 {
+            bug_check(0xDEADDEAD, self.value.as_ptr(), Some(prev as usize));
+        }
+    }
+}
+
+impl<T: RefCountedHandle> Deref for RefMut<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.value
+    }
+}
+
+impl<T: RefCountedHandle> DerefMut for RefMut<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.value
+    }
+}
+
+/// Opaque pointer to WDF object handle
+///
+/// It is only ever used as a reference `&Opaque<T>`. Can be
+/// upgraded to `Arc<T>` if the underlying object is not
+/// exclusively borrowed or deleted.
+#[repr(C)]
+pub struct Opaque<T> {
+    _private: [u8; 0], // Prevents instantiation of the struct from driver code
+    _marker: PhantomData<*mut T>, // *mut T disables Send and Sync. Just being conseravtive
+}
+
+impl<T: RefCountedHandle> Opaque<T> {
+    pub fn upgrade(&self) -> Option<Arc<T>> {
+        let inner_ptr = (self as *const Self).cast::<T>();
+        let inner = unsafe { &*inner_ptr };
+
+        let ref_count = inner.get_ref_count();
+
+        let mut cur = ref_count.load(Ordering::Relaxed);
+
+        loop {
+            // Values < -1 are invalid for ref count
+            if cur < -1 {
+                bug_check(
+                    0xDEADDEAD,
+                    (self as *const Self).cast_mut().cast::<_>(),
+                    Some(cur as usize),
+                );
+            }
+
+            // Exclusively borrowed or deleted
+            if cur == -1 || cur == 0 {
+                // It is not safe to upgrade to Arc
+                // under these conditions
+                return None;
+            }
+
+            match ref_count.compare_exchange_weak(
+                cur,
+                cur + 1,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    let arc = unsafe { Arc::from_raw_no_inc(inner_ptr as WDFOBJECT) };
+                    return Some(arc);
+                }
+                Err(next) => cur = next,
+            }
+        }
+    }
+}
 
 /// Thread-safe version of `OnceCell`
 ///
