@@ -14,6 +14,7 @@ use wdf::{
     MemoryDescriptorMut,
     NtResult,
     NtStatus,
+    Opaque,
     Request,
     Timeout,
     ctl_code,
@@ -186,7 +187,7 @@ bitflags::bitflags! {
 /// * `io_control_code` - the driver-defined or system-defined I/O control code
 /// (IOCTL) that is associated with the request.
 pub fn evt_io_device_control(
-    queue: &IoQueue,
+    queue: &Opaque<IoQueue>,
     mut request: Request,
     _output_buffer_length: usize,
     _input_buffer_length: usize,
@@ -196,6 +197,12 @@ pub fn evt_io_device_control(
         "I/O device control callback called. Control code: {:#X}",
         control_code
     );
+
+    let Some(queue) = queue.upgrade() else {
+        println!("Queue cannot be upgraded to Arc");
+        request.complete(status_codes::STATUS_INVALID_DEVICE_STATE.into());
+        return;
+    };
 
     let device = queue.get_device();
     let device_context = DeviceContext::get(device);

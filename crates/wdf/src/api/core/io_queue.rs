@@ -19,7 +19,7 @@ use super::{
     object::{Handle, impl_ref_counted_handle},
     request::{Request, RequestId, RequestStopActionFlags},
     result::{NtResult, NtStatusError, StatusCodeExt, status_codes},
-    sync::Arc,
+    sync::{Arc, Opaque},
 };
 
 impl_ref_counted_handle!(IoQueue, IoQueueContext);
@@ -128,11 +128,11 @@ pub struct IoQueueConfig {
     pub power_managed: TriState,
     pub allow_zero_length_requests: bool,
     pub default_queue: bool,
-    pub evt_io_default: Option<fn(&IoQueue, Request)>,
-    pub evt_io_read: Option<fn(&IoQueue, Request, usize)>,
-    pub evt_io_write: Option<fn(&IoQueue, Request, usize)>,
-    pub evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
-    pub evt_io_stop: Option<fn(&IoQueue, RequestId, RequestStopActionFlags)>,
+    pub evt_io_default: Option<fn(&Opaque<IoQueue>, Request)>,
+    pub evt_io_read: Option<fn(&Opaque<IoQueue>, Request, usize)>,
+    pub evt_io_write: Option<fn(&Opaque<IoQueue>, Request, usize)>,
+    pub evt_io_device_control: Option<fn(&Opaque<IoQueue>, Request, usize, usize, u32)>,
+    pub evt_io_stop: Option<fn(&Opaque<IoQueue>, RequestId, RequestStopActionFlags)>,
 }
 
 impl IoQueueConfig {
@@ -206,11 +206,11 @@ impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
 #[object_context_with_ref_count_check(IoQueue)]
 struct IoQueueContext {
     ref_count: AtomicIsize,
-    evt_io_default: Option<fn(&IoQueue, Request)>,
-    evt_io_read: Option<fn(&IoQueue, Request, usize)>,
-    evt_io_write: Option<fn(&IoQueue, Request, usize)>,
-    evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
-    evt_io_stop: Option<fn(&IoQueue, RequestId, RequestStopActionFlags)>,
+    evt_io_default: Option<fn(&Opaque<IoQueue>, Request)>,
+    evt_io_read: Option<fn(&Opaque<IoQueue>, Request, usize)>,
+    evt_io_write: Option<fn(&Opaque<IoQueue>, Request, usize)>,
+    evt_io_device_control: Option<fn(&Opaque<IoQueue>, Request, usize, usize, u32)>,
+    evt_io_stop: Option<fn(&Opaque<IoQueue>, RequestId, RequestStopActionFlags)>,
 }
 
 macro_rules! unsafe_request_handler {
@@ -228,10 +228,11 @@ macro_rules! unsafe_request_handler {
     (@impl $handler_name:ident, $req_transform:expr $(, $arg_name:ident: $arg_type:ty $(=> $arg_transform:expr)? )* ) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type )* ) {
-                let queue = unsafe { &*queue.cast::<IoQueue>() };
+                let queue_ref = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
 
-                let handlers = IoQueueContext::get(&queue);
+                let handlers = IoQueueContext::get(queue_ref);
+                let queue = unsafe { &*queue.cast::<Opaque<IoQueue>>() };
                 if let Some(handler) = handlers.$handler_name {
                     handler(queue, ($req_transform)(request) $(, unsafe_request_handler!(@transform $arg_name $(=> $arg_transform)? ) )*);
                     return;
