@@ -202,18 +202,6 @@ impl Device {
         }
         .and_then(|| Ok(wdf_string))
     }
-
-    /// Returns true if the device represented by the
-    /// given `WDFDEVICE` pointer is operational otherwise
-    /// returns false.
-    ///
-    /// # Safety
-    /// The passed pointer must be a valid WDFDEVICE handle
-    pub(crate) unsafe fn is_operational(device_ptr: WDFDEVICE) -> bool {
-        let device = unsafe { &*(device_ptr.cast::<Device>()) };
-        let ctxt = DeviceContext::get(device);
-        ctxt.is_operational.load(Ordering::Acquire)
-    }
 }
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);

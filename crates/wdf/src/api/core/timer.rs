@@ -1,12 +1,12 @@
 use core::{ptr::null_mut, sync::atomic::AtomicIsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
-use wdk_sys::{WDF_TIMER_CONFIG, WDFDEVICE, WDFTIMER, call_unsafe_wdf_function_binding};
+use wdk_sys::{WDF_TIMER_CONFIG, WDFTIMER, call_unsafe_wdf_function_binding};
 
 use super::{
     device::Device,
     init_wdf_struct,
-    object::{GetDevice, Handle, impl_ref_counted_handle, init_attributes},
+    object::{Handle, impl_ref_counted_handle, init_attributes},
     result::{NtResult, StatusCodeExt},
     sync::Arc,
 };
@@ -68,22 +68,11 @@ impl Timer {
     }
 
     pub fn get_device(&self) -> &Device {
-        self.get_device_safely()
-    }
-}
-
-impl GetDevice for Timer {
-    fn get_device_ptr(&self) -> WDFDEVICE {
         let device_ptr = unsafe {
             call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
-                as WDFDEVICE
         };
 
-        if device_ptr.is_null() {
-            panic!("Timer has no parent device");
-        }
-
-        device_ptr
+        unsafe { &*(device_ptr.cast::<Device>()) }
     }
 }
 

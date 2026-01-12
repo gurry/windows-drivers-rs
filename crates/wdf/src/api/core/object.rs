@@ -13,13 +13,12 @@ use wdk_sys::{
     STATUS_INVALID_PARAMETER,
     WDF_OBJECT_ATTRIBUTES,
     WDF_OBJECT_CONTEXT_TYPE_INFO,
-    WDFDEVICE,
     WDFOBJECT,
     call_unsafe_wdf_function_binding,
     ntddk::KeBugCheckEx,
 };
 
-use super::{device::Device, init_wdf_struct, result::NtResult};
+use super::{init_wdf_struct, result::NtResult};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
@@ -75,44 +74,6 @@ macro_rules! impl_ref_counted_handle {
 
 pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
-
-/// A trait for framework handles that can return the device they belong to
-// TODO: this trait is not the final design. We may need something more coherent
-pub trait GetDevice: Handle {
-    /// Gets the `WDFDEVICE` pointer to device that this object belongs to
-    ///
-    /// The implementing type needs to implement only this method.
-    /// The trait provides a default implementation of `get_device_safely`
-    fn get_device_ptr(&self) -> WDFDEVICE;
-
-    /// Gets the device that this object belongs to in a safe
-    /// manner i.e. only if the device is operational i.e.
-    /// in power state D0.
-    ///
-    /// Producing shared references to `Device` from any other handle type
-    /// is safe only when the device is operational because during the
-    /// non-operational state PNP methods might be accessing the device via
-    /// an exclusive reference (`&mut Device``) and therefore returning a
-    /// shared reference (`&Device`) at that time from anywhere else would
-    /// violate Rust's aliasing rules.
-    ///
-    /// Handle types such as `IoQueue` and `Timer` are examples of such types
-    /// that return `&Device`. All of them must adhere to the above guidelines
-    /// and produce `&Device` safely. They should not implement their own logic
-    /// and call this method instead to avoid code duplication and mistakes.
-    ///
-    /// # Panics
-    /// Panics if the device is not operational
-    fn get_device_safely(&self) -> &Device {
-        let device_ptr = self.get_device_ptr();
-
-        if unsafe { Device::is_operational(device_ptr) } {
-            unsafe { &*(device_ptr.cast::<Device>()) }
-        } else {
-            panic!("Attempt to retrieve &Device when device is not operational");
-        }
-    }
-}
 
 #[derive(Debug)]
 #[repr(transparent)]

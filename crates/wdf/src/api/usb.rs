@@ -32,7 +32,6 @@ use wdk_sys::{
     WDF_USB_REQUEST_COMPLETION_PARAMS,
     WDF_USB_REQUEST_TYPE,
     WDFCONTEXT,
-    WDFDEVICE,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
@@ -48,7 +47,7 @@ use super::core::{
     init_wdf_struct,
     io_target::{IoTarget, RequestFormatMemory, to_memory_ptrs},
     memory::{Memory, MemoryDescriptor, MemoryDescriptorMut},
-    object::{GetDevice, Handle, impl_handle, impl_ref_counted_handle},
+    object::{Handle, impl_handle, impl_ref_counted_handle},
     request::Request,
     result::{NtResult, NtStatus, StatusCodeExt, status_codes},
     sync::Arc,
@@ -214,12 +213,6 @@ impl UsbDevice {
                 interface_index
             )
         }
-    }
-}
-
-impl GetDevice for UsbDevice {
-    fn get_device_ptr(&self) -> WDFDEVICE {
-        self.get_io_target().get_device_ptr()
     }
 }
 
