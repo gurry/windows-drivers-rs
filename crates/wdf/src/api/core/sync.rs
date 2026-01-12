@@ -366,6 +366,13 @@ impl<T: RefCountedHandle> Opaque<T> {
     }
 }
 
+impl<T: RefCountedHandle> core::fmt::Debug for Opaque<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let ptr = self as *const Self;
+        write!(f, "{ptr:p}")
+    }
+}
+
 /// Thread-safe version of `OnceCell`
 ///
 /// Like `OnceCell` it allows initialization only
