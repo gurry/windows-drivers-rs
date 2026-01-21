@@ -380,13 +380,23 @@ fn evt_device_prepare_hardware(
     }
 
     let device_ctxt = DeviceContext::get(device);
-    let usb_device = device_ctxt.usb_device.lock();
 
-    let usb_device = usb_device.as_ref().expect("USB device should be set");
+    let info = {
+        // We're using this block to limit the scope of the 
+        // spinlock. Not only is doing that good for perf
+        // it also ensures the IRQL stays low enough for 
+        // subsequent calls like those in set_power_policy.
+        let usb_device = device_ctxt.usb_device.lock();
 
-    let info = usb_device.retrieve_information()?;
+        let info = usb_device
+            .as_ref()
+            .expect("USB device should be set")
+            .retrieve_information()?;
 
-    *device_ctxt.usb_device_traits.lock() = info.traits;
+        *device_ctxt.usb_device_traits.lock() = info.traits;
+
+        info
+    };
 
     println!(
         "IsDeviceHighSpeed: {}",
