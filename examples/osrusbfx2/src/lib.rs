@@ -346,48 +346,35 @@ fn evt_device_prepare_hardware(
 ) -> NtResult<()> {
     println!("Device prepare hardware callback called");
 
-    // In this function we have to get DeviceContext multiple times
-    // in order to prevent borrow checker errors.
-    // TODO: try to simplify this
-
-    // Create a UsbDevice if it does not already exist
-    let usb_device_exists = DeviceContext::get(device).usb_device.lock().is_some();
-
-    if !usb_device_exists {
-        // Create a USB device handle so that we can communicate with the
-        // underlying USB stack. The `UsbDevice` object is used to query,
-        // configure, and manage all aspects of the USB device.
-        // These aspects include device properties, bus properties,
-        // and I/O creation and synchronization. We only create device the first
-        // the PrepareHardware is called. If the device is restarted by pnp manager
-        // for resource rebalance, we will use the same device handle but then select
-        // the interfaces again because the USB stack could reconfigure the device on
-        // restart.
-        let usb_device = UsbDevice::create(
-            device,
-            &UsbDeviceCreateConfig {
-                usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
-            },
-        )?;
-
-        // TODO: If you are fetching configuration descriptor from device for
-        // selecting a configuration or to parse other descriptors, call
-        // USBD_ValidateConfigurationDescriptor to do basic validation on
-        // the descriptors before you access them.
-
-        let device_ctxt = DeviceContext::get(device);
-        *device_ctxt.usb_device.lock() = Some(usb_device);
-    }
+    // Create a USB device handle so that we can communicate with the
+    // underlying USB stack. The `UsbDevice` object is used to query,
+    // configure, and manage all aspects of the USB device.
+    // These aspects include device properties, bus properties,
+    // and I/O creation and synchronization. We only create device the first
+    // the PrepareHardware is called. If the device is restarted by pnp manager
+    // for resource rebalance, we will use the same device handle but then select
+    // the interfaces again because the USB stack could reconfigure the device on
+    // restart.
 
     let device_ctxt = DeviceContext::get(device);
 
-    let usb_device = device_ctxt.usb_device.lock().take().expect("USB device should be set");
+    // Take out the device from ctxt if it is already present
+    // or create a new one
+    let usb_device = device_ctxt.usb_device.lock().take();
+    let usb_device = match usb_device {
+        Some(usb_device)  => usb_device,
+        None => UsbDevice::create(device,
+                &UsbDeviceCreateConfig {
+                    usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
+                },
+            )?,
+    };
 
     let info = usb_device.retrieve_information()?;
 
-    *device_ctxt.usb_device_traits.lock() = info.traits;
-
     *device_ctxt.usb_device.lock() = Some(usb_device);
+
+    *device_ctxt.usb_device_traits.lock() = info.traits;
 
     println!(
         "IsDeviceHighSpeed: {}",
