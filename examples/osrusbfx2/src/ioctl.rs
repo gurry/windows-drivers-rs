@@ -276,11 +276,12 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
 
     stop_all_pipes(device_context);
 
-    let usb_device = device_context.usb_device.lock();
-
-    let usb_device = usb_device.as_ref().expect("USB device should be set");
-
-    usb_device.reset_port_synchronously()?;
+    device_context
+        .usb_device
+        .lock()
+        .as_ref()
+        .expect("USB device should be set")
+        .reset_port_synchronously()?;
 
     start_all_pipes(device_context)?;
 
