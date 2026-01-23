@@ -327,8 +327,8 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_prepare_hardware:
-        Option<fn(&mut Device, &CmResList, &CmResList) -> NtResult<()>>,
-    pub evt_device_release_hardware: Option<fn(&mut Device, &CmResList) -> NtResult<()>>,
+        Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
+    pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
     pub evt_device_self_managed_io_flush: Option<fn(&Device)>,
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,

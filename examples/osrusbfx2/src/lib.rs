@@ -340,7 +340,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 /// the translated hardware resources that the PnP manager has assigned to
 /// the device.
 fn evt_device_prepare_hardware(
-    device: &mut Device,
+    device: &Device,
     _resources_list: &CmResList,
     _resources_list_translated: &CmResList,
 ) -> NtResult<()> {
@@ -375,7 +375,7 @@ fn evt_device_prepare_hardware(
         // USBD_ValidateConfigurationDescriptor to do basic validation on
         // the descriptors before you access them.
 
-        let device_ctxt = DeviceContext::get_mut(device);
+        let device_ctxt = DeviceContext::get(device);
         *device_ctxt.usb_device.lock() = Some(usb_device);
     }
 
