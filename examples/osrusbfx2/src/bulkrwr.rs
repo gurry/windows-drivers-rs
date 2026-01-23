@@ -259,7 +259,11 @@ fn evt_request_write_completion_routine(
 /// * `request` - Request object
 /// * `action_flags` - Bitwise OR of one or more flags in
 ///   `RequestStopActionFlags`
-pub fn evt_io_stop(queue: &Opaque<IoQueue>, request_id: RequestId, action_flags: RequestStopActionFlags) {
+pub fn evt_io_stop(
+    queue: &Opaque<IoQueue>,
+    request_id: RequestId,
+    action_flags: RequestStopActionFlags,
+) {
     println!("I/O stop callback called");
 
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {

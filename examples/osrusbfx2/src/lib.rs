@@ -362,12 +362,13 @@ fn evt_device_prepare_hardware(
     // or create a new one
     let usb_device = device_ctxt.usb_device.lock().take();
     let usb_device = match usb_device {
-        Some(usb_device)  => usb_device,
-        None => UsbDevice::create(device,
-                &UsbDeviceCreateConfig {
-                    usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
-                },
-            )?,
+        Some(usb_device) => usb_device,
+        None => UsbDevice::create(
+            device,
+            &UsbDeviceCreateConfig {
+                usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
+            },
+        )?,
     };
 
     let info = usb_device.retrieve_information()?;
