@@ -4,6 +4,7 @@
 use wdf::{
     IoQueue,
     IoTarget,
+    Opaque,
     Request,
     RequestCompletionParamDetails,
     RequestCompletionToken,
@@ -26,7 +27,7 @@ const TEST_BOARD_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 /// * `queue` - The queue object which sent the request
 /// * `request` - The request object
 /// * `length` - Length of the data buffer associated with the request.
-pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
+pub fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
     println!("I/O read callback called");
 
     if length > TEST_BOARD_TRANSFER_BUFFER_SIZE {
@@ -39,6 +40,13 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     }
 
     let device_context = DeviceContext::get(queue.get_device());
+
+    if queue != device_context.read_queue {
+        println!("Queue {queue:?} is not the read queue");
+        request.complete_with_information(status_codes::STATUS_INVALID_DEVICE_REQUEST.into(), 0);
+        return;
+    };
+
     let pipe = device_context.get_bulk_read_pipe();
 
     // The format call validates to make sure that you are reading or
@@ -81,7 +89,7 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 /// * `target` - The I/O target to which the request was sent.
 fn evt_request_read_completion_routine(
     completion_token: RequestCompletionToken,
-    _target: &IoTarget,
+    _target: &Opaque<IoTarget>,
 ) {
     println!("Read completion routine called");
 
@@ -135,7 +143,7 @@ fn evt_request_read_completion_routine(
 /// * `queue`` - The queue object which sent the request
 /// * `request` - The request object
 /// * `length` - Length of the data buffer associated with the request.
-pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
+pub fn evt_io_write(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
     println!("I/O write callback called");
 
     if length > TEST_BOARD_TRANSFER_BUFFER_SIZE {
@@ -148,6 +156,13 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     }
 
     let device_context = DeviceContext::get(queue.get_device());
+
+    if queue != device_context.write_queue {
+        println!("Queue {queue:?} is not the write queue");
+        request.complete_with_information(status_codes::STATUS_INVALID_DEVICE_REQUEST.into(), 0);
+        return;
+    };
+
     let pipe = device_context.get_bulk_write_pipe();
 
     if let Err(e) =
@@ -186,7 +201,7 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
 /// * `target` - The I/O target to which the request was sent.
 fn evt_request_write_completion_routine(
     completion_token: RequestCompletionToken,
-    _target: &IoTarget,
+    _target: &Opaque<IoTarget>,
 ) {
     println!("Write completion routine called");
 
@@ -246,13 +261,18 @@ fn evt_request_write_completion_routine(
 /// * `request` - Request object
 /// * `action_flags` - Bitwise OR of one or more flags in
 ///   `RequestStopActionFlags`
-pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
+pub fn evt_io_stop(
+    queue: &Opaque<IoQueue>,
+    request_id: RequestId,
+    action_flags: RequestStopActionFlags,
+) {
     println!("I/O stop callback called");
 
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {
         Request::stop_acknowledge_no_requeue(request_id);
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
         let device_context = DeviceContext::get(queue.get_device());
+
         let Some(sent_request) = device_context.get_sent_request(request_id) else {
             println!(
                 "evt_io_stop: request {:?} may have been already completed",
@@ -260,6 +280,7 @@ pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: Request
             );
             return;
         };
+
         Request::cancel_sent_request(sent_request);
     }
 }

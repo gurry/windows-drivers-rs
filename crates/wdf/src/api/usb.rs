@@ -32,7 +32,6 @@ use wdk_sys::{
     WDF_USB_REQUEST_COMPLETION_PARAMS,
     WDF_USB_REQUEST_TYPE,
     WDFCONTEXT,
-    WDFDEVICE,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
@@ -86,6 +85,10 @@ impl UsbDevice {
         // SAFETY: Every UsbDevice is a WDFIOTARGET so this
         // cast is valid
         unsafe { &*(self.as_ptr().cast::<IoTarget>()) }
+    }
+
+    pub fn get_device(&self) -> &Device {
+        self.get_io_target().get_device()
     }
 
     pub fn retrieve_config_descriptor(&self, buffer: Option<&mut [u8]>) -> NtResult<u16> {
@@ -218,8 +221,8 @@ impl UsbDevice {
 }
 
 impl GetDevice for UsbDevice {
-    fn get_device_ptr(&self) -> WDFDEVICE {
-        self.get_io_target().get_device_ptr()
+    fn get_device(&self) -> &Device {
+        self.get_device()
     }
 }
 

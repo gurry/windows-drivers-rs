@@ -14,6 +14,7 @@ use wdf::{
     MemoryDescriptorMut,
     NtResult,
     NtStatus,
+    Opaque,
     Request,
     Timeout,
     ctl_code,
@@ -186,7 +187,7 @@ bitflags::bitflags! {
 /// * `io_control_code` - the driver-defined or system-defined I/O control code
 /// (IOCTL) that is associated with the request.
 pub fn evt_io_device_control(
-    queue: &IoQueue,
+    queue: &Opaque<IoQueue>,
     mut request: Request,
     _output_buffer_length: usize,
     _input_buffer_length: usize,
@@ -197,8 +198,14 @@ pub fn evt_io_device_control(
         control_code
     );
 
-    let device = queue.get_device();
-    let device_context = DeviceContext::get(device);
+    let device_context = DeviceContext::get(queue.get_device());
+
+    if queue != device_context.default_queue {
+        println!("Queue {queue:?} is not the default queue");
+        request.complete_with_information(status_codes::STATUS_INVALID_DEVICE_REQUEST.into(), 0);
+        return;
+    };
+
     let mut request_pending = false;
 
     let result = match control_code {
@@ -248,10 +255,8 @@ pub fn evt_io_device_control(
 fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) -> NtResult<usize> {
     println!("Get config descriptor");
 
-    let usb_device = device_context
-        .usb_device
-        .as_ref()
-        .expect("USB device should be set");
+    let usb_device = device_context.usb_device.lock();
+    let usb_device = usb_device.as_ref().expect("USB device should be set");
 
     let required_size = usb_device
         .retrieve_config_descriptor(None)
@@ -271,11 +276,12 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
 
     stop_all_pipes(device_context);
 
-    let usb_device = device_context
+    device_context
         .usb_device
+        .lock()
         .as_ref()
-        .expect("USB device should be set");
-    usb_device.reset_port_synchronously()?;
+        .expect("USB device should be set")
+        .reset_port_synchronously()?;
 
     start_all_pipes(device_context)?;
 
@@ -556,10 +562,9 @@ fn send_vendor_command(
         memory_descriptor,
     };
 
-    let usb_device = device_context
-        .usb_device
-        .as_ref()
-        .expect("USB device should be set");
+    let usb_device = device_context.usb_device.lock();
+
+    let usb_device = usb_device.as_ref().expect("USB device should be set");
 
     let bytes_transferred = usb_device.send_control_transfer_synchronously(
         None,

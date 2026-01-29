@@ -36,6 +36,7 @@ use wdf::{
     IoQueueConfig,
     IoQueueDispatchType,
     NtResult,
+    Opaque,
     PnpPowerEventCallbacks,
     Request,
     RequestCancellationToken,
@@ -48,6 +49,12 @@ extern crate alloc;
 use alloc::{vec, vec::Vec};
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
+
+/// Context object to be attached to a device
+#[object_context(Device)]
+struct DeviceContext {
+    queue: Arc<IoQueue>,
+}
 
 /// Context object to be attached to a queue
 #[object_context(IoQueue)]
@@ -65,12 +72,6 @@ struct QueueContext {
 
     // The timer that is used to complete the request
     timer: Arc<Timer>,
-}
-
-/// Context object to be attached to a timer
-#[object_context(Timer)]
-struct TimerContext {
-    queue: Arc<IoQueue>,
 }
 
 /// The entry point for the driver. It initializes the driver and is the first
@@ -172,13 +173,6 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
 
     let timer = Timer::create(&timer_config)?;
 
-    // Attach context to the timer
-    let timer_context = TimerContext {
-        queue: queue.clone(),
-    };
-
-    TimerContext::attach(&timer, timer_context)?;
-
     // Attach context to the queue
     let queue_context = QueueContext {
         request: SpinLock::create(None)?,
@@ -187,6 +181,11 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     };
 
     QueueContext::attach(&queue, queue_context)?;
+
+    // Attach context to the queue
+    let device_context = DeviceContext { queue };
+
+    DeviceContext::attach(device, device_context)?;
 
     Ok(())
 }
@@ -250,10 +249,18 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 ///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
-fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
+fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
 
-    let context = QueueContext::get(&queue);
+    let device_context = DeviceContext::get(queue.get_device());
+
+    if queue != device_context.queue {
+        println!("Queue {queue:?} not found in device context");
+        request.complete_with_information(status_codes::STATUS_INVALID_DEVICE_REQUEST.into(), 0);
+        return;
+    };
+
+    let context = QueueContext::get(&device_context.queue);
     let memory = match request.retrieve_output_memory() {
         Ok(memory) => memory,
         Err(e) => {
@@ -314,7 +321,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 ///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
-fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
+fn evt_io_write(queue: &Opaque<IoQueue>, request: Request, length: usize) {
     println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
 
     if length > MAX_WRITE_LENGTH {
@@ -340,7 +347,15 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
         return;
     }
 
-    let context = QueueContext::get(&queue);
+    let device_context = DeviceContext::get(queue.get_device());
+
+    if queue != device_context.queue {
+        println!("Queue {queue:?} not found in device context");
+        request.complete_with_information(status_codes::STATUS_INVALID_DEVICE_REQUEST.into(), 0);
+        return;
+    };
+
+    let context = QueueContext::get(&device_context.queue);
 
     *context.buffer.lock() = Some(buffer);
 
@@ -382,12 +397,14 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// # Arguments
 ///
 /// * `timer` - Handle of the timer that fired
-fn evt_timer(timer: &Timer) {
+fn evt_timer(timer: &Opaque<Timer>) {
     println!("evt_timer called");
 
-    let queue = &TimerContext::get(timer).queue;
-
-    let req = QueueContext::get(queue).request.lock().take();
+    let device_context = DeviceContext::get(timer.get_device());
+    let req = QueueContext::get(&device_context.queue)
+        .request
+        .lock()
+        .take();
 
     if let Some(req) = req {
         req.complete(status_codes::STATUS_SUCCESS.into());
