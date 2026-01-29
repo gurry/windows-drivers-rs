@@ -1,14 +1,14 @@
 use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
-use wdk_sys::{WDF_TIMER_CONFIG, WDFDEVICE, WDFTIMER, call_unsafe_wdf_function_binding};
+use wdk_sys::{WDF_TIMER_CONFIG, WDFTIMER, call_unsafe_wdf_function_binding};
 
 use super::{
     device::Device,
     init_wdf_struct,
     object::{GetDevice, Handle, impl_ref_counted_handle, init_attributes},
     result::{NtResult, StatusCodeExt},
-    sync::Arc,
+    sync::{Arc, Opaque},
 };
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -68,27 +68,22 @@ impl Timer {
     }
 
     pub fn get_device(&self) -> &Device {
-        self.get_device_safely()
+        let device_ptr = unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
+        };
+
+        unsafe { &*(device_ptr.cast::<Device>()) }
     }
 }
 
 impl GetDevice for Timer {
-    fn get_device_ptr(&self) -> WDFDEVICE {
-        let device_ptr = unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
-                as WDFDEVICE
-        };
-
-        if device_ptr.is_null() {
-            panic!("Timer has no parent device");
-        }
-
-        device_ptr
+    fn get_device(&self) -> &Device {
+        self.get_device()
     }
 }
 
 pub struct TimerConfig<'a, P: Handle> {
-    pub evt_timer_func: fn(&Timer),
+    pub evt_timer_func: fn(&Opaque<Timer>),
     pub period: u32,
     pub tolerable_delay: u32,
     pub use_high_resolution_timer: bool,
@@ -96,7 +91,7 @@ pub struct TimerConfig<'a, P: Handle> {
 }
 
 impl<'a, P: Handle> TimerConfig<'a, P> {
-    pub fn new_non_periodic(parent: &'a P, evt_timer_func: fn(&Timer)) -> Self {
+    pub fn new_non_periodic(parent: &'a P, evt_timer_func: fn(&Opaque<Timer>)) -> Self {
         Self {
             evt_timer_func,
             period: 0,
@@ -108,7 +103,7 @@ impl<'a, P: Handle> TimerConfig<'a, P> {
 
     pub fn new_periodic(
         parent: &'a P,
-        evt_timer_func: fn(&Timer),
+        evt_timer_func: fn(&Opaque<Timer>),
         period: u32,
         tolerable_delay: u32,
         use_high_resolution_timer: bool,
@@ -139,11 +134,12 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 #[object_context_with_ref_count_check(Timer)]
 struct TimerContext {
     ref_count: AtomicUsize,
-    evt_timer_func: fn(&Timer),
+    evt_timer_func: fn(&Opaque<Timer>),
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
-    let timer = unsafe { &*timer.cast::<Timer>() };
-    let timer_state = TimerContext::get(&timer);
+    let timer_ref = unsafe { &*timer.cast::<Timer>() };
+    let timer_state = TimerContext::get(timer_ref);
+    let timer = unsafe { &*timer.cast::<Opaque<Timer>>() };
     (timer_state.evt_timer_func)(timer);
 }

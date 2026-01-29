@@ -6,7 +6,6 @@ use wdk_sys::{
     PWDFMEMORY_OFFSET,
     WDF_IO_TARGET_SENT_IO_ACTION,
     WDF_NO_OBJECT_ATTRIBUTES,
-    WDFDEVICE,
     WDFIOTARGET,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
@@ -69,7 +68,11 @@ impl IoTarget {
     }
 
     pub fn get_device(&self) -> &Device {
-        self.get_device_safely()
+        let device_ptr = unsafe {
+            call_unsafe_wdf_function_binding!(WdfIoTargetGetDevice, self.as_ptr().cast())
+        };
+
+        unsafe { &*(device_ptr.cast::<Device>()) }
     }
 
     pub fn format_request_for_read(
@@ -120,8 +123,11 @@ impl IoTarget {
 }
 
 impl GetDevice for IoTarget {
-    fn get_device_ptr(&self) -> WDFDEVICE {
-        unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetGetDevice, self.as_ptr().cast()) }
+    fn get_device(&self) -> &Device {
+        unsafe {
+            &*(call_unsafe_wdf_function_binding!(WdfIoTargetGetDevice, self.as_ptr().cast())
+                as *const Device)
+        }
     }
 }
 

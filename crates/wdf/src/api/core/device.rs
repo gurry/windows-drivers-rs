@@ -1,7 +1,4 @@
-use core::{
-    default::Default,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use core::{default::Default, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
@@ -79,7 +76,6 @@ impl Device {
                 device,
                 DeviceContext {
                     ref_count: AtomicUsize::new(0),
-                    is_operational: AtomicBool::new(false),
                     pnp_power_callbacks,
                 },
             )?;
@@ -202,18 +198,6 @@ impl Device {
         }
         .and_then(|| Ok(wdf_string))
     }
-
-    /// Returns true if the device represented by the
-    /// given `WDFDEVICE` pointer is operational otherwise
-    /// returns false.
-    ///
-    /// # Safety
-    /// The passed pointer must be a valid WDFDEVICE handle
-    pub(crate) unsafe fn is_operational(device_ptr: WDFDEVICE) -> bool {
-        let device = unsafe { &*(device_ptr.cast::<Device>()) };
-        let ctxt = DeviceContext::get(device);
-        ctxt.is_operational.load(Ordering::Acquire)
-    }
 }
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
@@ -329,7 +313,6 @@ impl Default for DevicePnpCapabilities {
 #[object_context_with_ref_count_check(Device)]
 struct DeviceContext {
     ref_count: AtomicUsize,
-    is_operational: AtomicBool, // Is true if device is in D0 or higher power state
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }
 
@@ -340,9 +323,8 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit: Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
-    pub evt_device_prepare_hardware:
-        Option<fn(&mut Device, &CmResList, &CmResList) -> NtResult<()>>,
-    pub evt_device_release_hardware: Option<fn(&mut Device, &CmResList) -> NtResult<()>>,
+    pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
+    pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
     pub evt_device_self_managed_io_flush: Option<fn(&Device)>,
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
@@ -575,10 +557,6 @@ pub extern "C" fn __evt_device_d0_entry(
 ) -> NTSTATUS {
     let (device, ctxt) = get_device_and_ctxt(device);
 
-    // Set the device as operational before entering D0 so that
-    // the user's code ceases to get unique access to framework objects
-    ctxt.is_operational.store(true, Ordering::Release); // TODO: Do we really need Release here?
-
     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
         if let Some(callback) = callbacks.evt_device_d0_entry {
             let previous_state = to_rust_power_state_enum(previous_state);
@@ -607,11 +585,6 @@ pub extern "C" fn __evt_device_d0_exit(
             user_callback_result = Some(callback(device, target_state));
         }
     }
-
-    // Set the device as non operational after exiting D0 so that
-    // the user's code in subsequent PNP callbacks (like EventDeviceHardwareRelease)
-    // can again start to gain unique access to framework objects
-    ctxt.is_operational.store(false, Ordering::Release); // TODO: Do we really need Release here?
 
     if let Some(res) = user_callback_result {
         to_status_code(&res)

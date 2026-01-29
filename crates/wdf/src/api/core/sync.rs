@@ -130,10 +130,17 @@ pub struct Arc<T: RefCountedHandle> {
 }
 
 impl<T: RefCountedHandle> Arc<T> {
-    /// Creates a new `Arc` from a raw WDF object pointer
+    /// Creates a new `Arc` from a raw WDF object pointer and
+    /// increments the ref count by 1.
+    ///
     /// # Safety
-    /// `ptr` must be a valid WDF object pointer that implements
+    ///
+    /// The following requirements must be met:
+    /// - `ptr` must be non-null
+    /// - `ptr` must be a valid WDF object pointer that implements
     /// `RefCountedHandle`.
+    /// - The ref count of the object pointed to by `ptr` must be 0
+    /// (`from_raw` will increment it to 1)
     pub(crate) unsafe fn from_raw(ptr: WDFOBJECT) -> Self {
         let obj = unsafe { &*ptr.cast::<T>() };
         let ref_count = obj.get_ref_count();
@@ -161,36 +168,26 @@ impl<T: RefCountedHandle> Arc<T> {
         }
     }
 
-    /// Returns a mutable reference to the inner value
+    #[inline(always)]
+    fn get_ref_count(&self) -> &AtomicUsize {
+        let obj = unsafe { &*self.as_ptr().cast::<T>() };
+        obj.get_ref_count()
+    }
+
+    /// Gets a mutable reference to the inner value
     ///
     /// A mutable reference to the inner value is returned only
-    /// if the `Device` associated with `T` is in on operational
-    /// state (i.e. D0 power state or higher)
-    ///
-    /// # Panics
-    /// Panics if the `Device` associated with `T` is operational
-    pub fn get_mut(&mut self) -> &mut T
-    where
-        T: GetDevice,
-    {
-        let device_ptr = self.get_device_ptr();
-
-        if unsafe { Device::is_operational(device_ptr) } {
-            // When the device is operational its callbacks
-            // are running and they receive their arguments
-            // as normal references `&T` not as `Arc<T>`.
-            // Therefore even if the `Arc<T>` ref count is 1,
-            // during this state other kinds of references
-            // may still be active and it's unsafe to return
-            // an exclusive reference to `T`.
-            panic!(
-                "Cannot get mutable reference to {} because the associated device is in \
-                 operational state",
-                T::type_name()
-            );
+    /// if the ref count is 1, i.e. there are no other `Arc`
+    /// instances otherwise `None` is returned.
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        // `Relaxed` ordering is sufficient here because
+        // we are the only thread that has access to `self`
+        // thanks to `&mut self` above
+        if self.get_ref_count().load(Ordering::Relaxed) == 1 {
+            Some(unsafe { &mut *self.as_ptr().cast::<T>() })
+        } else {
+            None
         }
-
-        unsafe { &mut *self.as_ptr().cast::<T>() }
     }
 }
 
@@ -267,6 +264,51 @@ unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
 /// `Arc<T>` being `Send` requires `T` to be both `Send`
 /// and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
+
+/// Opaque pointer to WDF object handle
+///
+/// It is only ever used as a reference `&Opaque<T>`. Can be
+/// upgraded to `Arc<T>` if the underlying object is not
+/// exclusively borrowed or deleted.
+#[repr(C)]
+pub struct Opaque<T> {
+    _private: [u8; 0], // Prevents instantiation of the struct from driver code
+    _marker: PhantomData<*mut T>, // *mut T disables Send and Sync. Just being conseravtive
+}
+
+impl<T: Handle> Opaque<T> {
+    /// Gets the raw WDF handle
+    pub fn as_ptr(&self) -> WDFOBJECT {
+        self as *const Self as WDFOBJECT
+    }
+}
+
+impl<T: GetDevice> Opaque<T> {
+    pub fn get_device(&self) -> &Device {
+        let obj = unsafe { &*((self as *const Self).cast::<T>()) };
+        obj.get_device()
+    }
+}
+
+impl<T: RefCountedHandle> core::fmt::Debug for Opaque<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let ptr = self as *const Self;
+        write!(f, "{ptr:p}")
+    }
+}
+
+impl<T: RefCountedHandle> PartialEq<Arc<T>> for &Opaque<T> {
+    fn eq(&self, other: &Arc<T>) -> bool {
+        self.as_ptr() == other.as_ptr()
+    }
+}
+
+// For the reverse comparison
+impl<T: RefCountedHandle> PartialEq<Opaque<T>> for Arc<T> {
+    fn eq(&self, other: &Opaque<T>) -> bool {
+        self.as_ptr() == other.as_ptr()
+    }
+}
 
 /// Thread-safe version of `OnceCell`
 ///

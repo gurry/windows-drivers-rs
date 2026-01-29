@@ -58,16 +58,14 @@ const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
 /// Object context for the `Device` object
 #[object_context(Device)]
 struct DeviceContext {
-    usb_device: Option<Arc<UsbDevice>>,
-    usb_device_traits: UsbDeviceTraits,
+    usb_device: SpinLock<Option<Arc<UsbDevice>>>,
+    usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
     interrupt_msg_queue: Arc<IoQueue>,
-    // Below three variables are never used.
-    // They're placed here only to keep the queues alive
-    _default_queue: Arc<IoQueue>,
-    _read_queue: Arc<IoQueue>,
-    _write_queue: Arc<IoQueue>,
+    default_queue: Arc<IoQueue>,
+    read_queue: Arc<IoQueue>,
+    write_queue: Arc<IoQueue>,
 }
 
 impl DeviceContext {
@@ -98,7 +96,8 @@ impl DeviceContext {
     }
 
     fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
-        let usb_device = self.usb_device.as_ref().expect("USB device should be set");
+        let usb_device = self.usb_device.lock();
+        let usb_device = usb_device.as_ref().expect("USB device should be set");
         let usb_device_context = UsbDeviceContext::get(&usb_device);
         let usb_interface = usb_device
             .get_interface(0)
@@ -271,14 +270,14 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     // Attach device context
     let context = DeviceContext {
-        usb_device: None,
-        usb_device_traits: UsbDeviceTraits::empty(),
+        usb_device: SpinLock::create(None)?,
+        usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
         current_switch_state: SpinLock::create(SwitchState::empty())?,
         sent_requests: SpinLock::create(Vec::new())?,
         interrupt_msg_queue,
-        _default_queue: default_queue,
-        _read_queue: read_queue,
-        _write_queue: write_queue,
+        default_queue,
+        read_queue,
+        write_queue,
     };
 
     DeviceContext::attach(device, context)?;
@@ -339,54 +338,42 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 /// the translated hardware resources that the PnP manager has assigned to
 /// the device.
 fn evt_device_prepare_hardware(
-    device: &mut Device,
+    device: &Device,
     _resources_list: &CmResList,
     _resources_list_translated: &CmResList,
 ) -> NtResult<()> {
     println!("Device prepare hardware callback called");
 
-    // In this function we have to get DeviceContext multiple times
-    // in order to prevent borrow checker errors.
-    // TODO: try to simplify this
+    // Create a USB device handle so that we can communicate with the
+    // underlying USB stack. The `UsbDevice` object is used to query,
+    // configure, and manage all aspects of the USB device.
+    // These aspects include device properties, bus properties,
+    // and I/O creation and synchronization. We only create device the first
+    // the PrepareHardware is called. If the device is restarted by pnp manager
+    // for resource rebalance, we will use the same device handle but then select
+    // the interfaces again because the USB stack could reconfigure the device on
+    // restart.
 
-    // Create a UsbDevice if it does not already exist
-    let usb_device_exists = DeviceContext::get(device).usb_device.is_some();
+    let device_ctxt = DeviceContext::get(device);
 
-    if !usb_device_exists {
-        // Create a USB device handle so that we can communicate with the
-        // underlying USB stack. The `UsbDevice` object is used to query,
-        // configure, and manage all aspects of the USB device.
-        // These aspects include device properties, bus properties,
-        // and I/O creation and synchronization. We only create device the first
-        // the PrepareHardware is called. If the device is restarted by pnp manager
-        // for resource rebalance, we will use the same device handle but then select
-        // the interfaces again because the USB stack could reconfigure the device on
-        // restart.
-        let usb_device = UsbDevice::create(
+    // Take out the device from ctxt if it is already present
+    // or create a new one
+    let usb_device = device_ctxt.usb_device.lock().take();
+    let usb_device = match usb_device {
+        Some(usb_device) => usb_device,
+        None => UsbDevice::create(
             device,
             &UsbDeviceCreateConfig {
                 usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
             },
-        )?;
-
-        // TODO: If you are fetching configuration descriptor from device for
-        // selecting a configuration or to parse other descriptors, call
-        // USBD_ValidateConfigurationDescriptor to do basic validation on
-        // the descriptors before you access them.
-
-        let device_ctxt = DeviceContext::get_mut(device);
-        device_ctxt.usb_device = Some(usb_device);
-    }
-
-    let device_ctxt = DeviceContext::get_mut(device);
-    let usb_device = device_ctxt
-        .usb_device
-        .as_ref()
-        .expect("USB device should be set");
+        )?,
+    };
 
     let info = usb_device.retrieve_information()?;
 
-    device_ctxt.usb_device_traits = info.traits;
+    *device_ctxt.usb_device.lock() = Some(usb_device);
+
+    *device_ctxt.usb_device_traits.lock() = info.traits;
 
     println!(
         "IsDeviceHighSpeed: {}",
@@ -507,13 +494,15 @@ fn set_power_policy(device: &Device) -> NtResult<()> {
 
 /// This helper routine selects the configuration, interface and
 /// creates a context for every pipe (end point) in that interface.
-fn select_interface(device: &mut Device) -> NtResult<()> {
-    let device_ctxt = DeviceContext::get_mut(device);
-    let usb_device = device_ctxt
-        .usb_device
+fn select_interface(device: &Device) -> NtResult<()> {
+    let device_ctxt = DeviceContext::get(device);
+    let mut usb_device = device_ctxt.usb_device.lock();
+
+    let usb_device = usb_device
         .as_mut()
         .expect("USB device should be set")
-        .get_mut();
+        .get_mut()
+        .expect("USB device should be mutable");
 
     let interface_info = usb_device
         .select_config_single_interface()
@@ -526,6 +515,7 @@ fn select_interface(device: &mut Device) -> NtResult<()> {
             // it is a 1.1 port
             if !device_ctxt
                 .usb_device_traits
+                .lock()
                 .contains(UsbDeviceTraits::AT_HIGH_SPEED)
             {
                 println!(
@@ -587,7 +577,7 @@ fn select_interface(device: &mut Device) -> NtResult<()> {
         bulk_write_pipe_index: bulk_write_pipe_index.expect("bulk_write_pipe_index should be Some"),
     };
 
-    UsbDeviceContext::attach(usb_device, context)?;
+    UsbDeviceContext::attach(&usb_device, context)?;
 
     let Some(interface) = usb_device.get_interface_mut(0) else {
         println!("Failed to get interface 0");

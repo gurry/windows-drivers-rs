@@ -23,7 +23,7 @@ use super::{
     memory::{Memory, OwnedMemory},
     object::Handle,
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
-    sync::SpinLock,
+    sync::{Opaque, SpinLock},
 };
 use crate::usb::UsbRequestCompletionParams;
 
@@ -197,7 +197,7 @@ impl Request {
 
     pub fn set_completion_routine(
         &mut self,
-        completion_routine: fn(RequestCompletionToken, &IoTarget),
+        completion_routine: fn(RequestCompletionToken, &Opaque<IoTarget>),
     ) -> NtResult<()> {
         let context = self.get_context_mut_or_attach_new()?;
 
@@ -363,7 +363,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 #[object_context(Request)]
 struct RequestContext {
     evt_request_cancel: Option<fn(&RequestCancellationToken)>,
-    evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
+    evt_request_completion_routine: Option<fn(RequestCompletionToken, &Opaque<IoTarget>)>,
 }
 
 /// Macro that defines input and output memory contexts
@@ -436,7 +436,7 @@ pub extern "C" fn __evt_request_completion_routine(
     // `Request::get_completion_params` inside their callback.
     // That way params cannot outlive the request
     callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
-        &*(target.cast::<IoTarget>())
+        &*(target.cast::<Opaque<IoTarget>>())
     });
 }
 
