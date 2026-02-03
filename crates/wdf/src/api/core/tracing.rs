@@ -4,7 +4,6 @@ use core::{mem, ptr};
 use wdk_sys::{
     DRIVER_OBJECT,
     GUID,
-    LONG,
     LPCGUID,
     LPCSTR,
     LPGUID,
@@ -33,6 +32,25 @@ pub static mut WPP_GLOBAL_Control: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::null_mu
 
 #[unsafe(no_mangle)]
 pub static mut WPP_RECORDER_INITIALIZED: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::null_mut();
+
+pub static mut WPP_MAIN_CB: WPP_PROJECT_CONTROL_BLOCK = WPP_PROJECT_CONTROL_BLOCK {
+    Control: mem::ManuallyDrop::new(WPP_TRACE_CONTROL_BLOCK {
+        Callback: None,
+        ControlGuid: ptr::null(),
+        Next: ptr::null(),
+        Logger: 0,
+        RegistryPath: ptr::null_mut(),
+        FlagsLen: WPP_FLAG_LEN,
+        Level: 0,
+        Reserved: 0,
+        Flags: [0; 1],
+        ReservedFlags: 0,
+        RegHandle: 0,
+        AutoLogContext: ptr::null_mut(),
+        AutoLogVerboseEnabled: 0,
+        AutoLogAttachToMiniDump: 0,
+    }),
+};
 
 const WPP_FLAG_LEN: UCHAR = 1;
 
@@ -78,7 +96,16 @@ impl TraceWriter {
     ///
     /// # Safety
     ///
-    /// The pointers `wdm_driver` and `reg_path` must be valid
+    /// The pointers `wdm_driver` and `reg_path` must be valid.
+    /// 
+    /// This function is implemented in a hacky way to test tracing. It should
+    /// only be called once since it sets up global state for WPP tracing.
+    /// Calling it multiple times may lead to undefined behavior due to multiple
+    /// initializations of the WPP control block and potential conflicts in the
+    /// global state.
+    /// 
+    /// TODO: Create a proper singleton pattern to ensure only one instance
+    /// of `TraceWriter` can exist at a time.
     pub unsafe fn init(
         control_guid: Guid,
         wdm_driver: *mut DRIVER_OBJECT,
@@ -88,22 +115,9 @@ impl TraceWriter {
         // which we can use in WPP_PROJECT_CONTROL_BLOCK::ControlBlock below
         let control_guid = Box::new(control_guid);
 
-        let mut control_block = WPP_TRACE_CONTROL_BLOCK {
-            Callback: None,
-            ControlGuid: control_guid.as_lpcguid(),
-            Next: ptr::null(),
-            Logger: 0,
-            RegistryPath: ptr::null_mut(),
-            FlagsLen: WPP_FLAG_LEN,
-            Level: 0,
-            Reserved: 0,
-            Flags: [0; 1],
-            ReservedFlags: 0,
-            RegHandle: 0,
-            AutoLogContext: ptr::null_mut(),
-            AutoLogVerboseEnabled: 0,
-            AutoLogAttachToMiniDump: 0,
-        };
+        unsafe {
+            (*WPP_MAIN_CB.Control).ControlGuid = control_guid.as_lpcguid();
+        }
 
         // TODO: check if any of these functions can fail and handle errors accordingly
 
@@ -114,21 +128,20 @@ impl TraceWriter {
         if let Some(etw_register_provider) = etw_register_classic_provider {
             etw_unregister = get_routine_addr!("EtwUnregister", EtwUnregister);
 
+            let control = unsafe { &mut *WPP_MAIN_CB.Control };
             etw_register_provider(
-                control_block.ControlGuid,
+                control.ControlGuid,
                 0,
                 WppClassicProviderCallback,
-                unsafe { mem::transmute(&mut control_block) },
-                &mut control_block.RegHandle,
+                unsafe { mem::transmute(&mut *control) },
+                &mut control.RegHandle,
             );
         }
 
         let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
 
         let trace_config = TraceConfig {
-            control_block: WPP_PROJECT_CONTROL_BLOCK {
-                Control: mem::ManuallyDrop::new(control_block),
-            },
+            control_block: &raw mut WPP_MAIN_CB,
             wpp_trace_message,
             etw_unregister,
         };
@@ -143,23 +156,20 @@ impl TraceWriter {
 
     /// Starts WPP tracing
     pub fn start(&self) {
-        let control_block_ptr =
-            (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
+        let control_block_ptr = self.trace_config.control_block;
         unsafe {
             WPP_GLOBAL_Control = control_block_ptr;
-            WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
-
             WppAutoLogStart(control_block_ptr, self.wdm_driver, self.reg_path);
+            WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
         }
     }
 
     /// Stops WPP tracing
     pub fn stop(&self) {
-        let control_block_ptr =
-            (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
+        let control_block_ptr = self.trace_config.control_block;
         unsafe {
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                etw_unregister(self.trace_config.control_block.Control.RegHandle);
+                etw_unregister((&(*control_block_ptr).Control).RegHandle);
             }
 
             WppAutoLogStop(control_block_ptr, self.wdm_driver);
@@ -208,9 +218,10 @@ impl TraceWriter {
         };
 
         unsafe {
+            let control_block = &(*self.trace_config.control_block).Control;
             if let Some(wpp_trace_message) = self.trace_config.wpp_trace_message {
                 wpp_trace_message(
-                    self.trace_config.control_block.Control.Logger,
+                    control_block.Logger,
                     WPP_TRACE_OPTIONS,
                     traceGuid,
                     id,
@@ -223,7 +234,7 @@ impl TraceWriter {
             }
 
             WppAutoLogTrace(
-                self.trace_config.control_block.Control.AutoLogContext,
+                control_block.AutoLogContext,
                 level,
                 flags,
                 traceGuid.cast_mut().cast(),
@@ -285,7 +296,7 @@ struct WPP_TRACE_ENABLE_CONTEXT {
 }
 
 struct TraceConfig {
-    control_block: WPP_PROJECT_CONTROL_BLOCK,
+    control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
     wpp_trace_message: Option<WppTraceMessage>,
     etw_unregister: Option<EtwUnregister>,
 }
