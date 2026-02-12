@@ -50,27 +50,63 @@ use alloc::{vec, vec::Vec};
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
-///---- These traits are port of the wdf crate we supply ----
- 
-pub trait Driver {
-    fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()>;
+///---- These traits are part of the wdf crate we supply ----
+
+pub trait Driver {    
+    fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
+        Ok(())
+    }
 }
+
+fn driver_init<T: Driver>(driver: T) -> NtResult<&T> {
+    //...
+}
+
 
 pub trait Device {
-    fn evt_device_self_managed_io_init(&self) -> NtResult<()>;
-    fn evt_device_self_managed_io_suspend(&self) -> NtResult<()>;
-    fn evt_device_self_managed_io_restart(&self) -> NtResult<()>;
+    fn evt_device_self_managed_io_init(&self) -> NtResult<()> {
+        Ok(()) 
+    }
+    fn evt_device_self_managed_io_suspend(&self) -> NtResult<()> {
+        Ok(())
+    }
+    fn evt_device_self_managed_io_restart(&self) -> NtResult<()> {
+        Ok(())
+    }
+
+    // Others callbacks ...
 }
+
+fn device_init<T: Device>(device: T, device_init: &DeviceInit) -> NtResult<&T> {
+    //...
+}
+
 
 pub trait IoQueue {
-    fn evt_io_read(&self, request: Request, length: usize);
-    fn evt_io_write(&self, request: Request, length: usize);
+    fn evt_io_read(&self, request: Request, length: usize) {
+        Ok(())
+    }
+    fn evt_io_write(&self, request: Request, length: usize) {
+        Ok(())
+    }
+    
+    // Others callbacks ...
 }
+
+fn queue_init<T: IoQueue>(queue: T, device: &Device, config: &IoQueueConfig) -> NtResult<Arc<T>> {
+    //...
+}
+
 
 pub trait Timer {
-    fn evt_timer(&self);
+    fn evt_timer(&self) {
+        Ok(())
+    }
 }
 
+fn timer_init<T: Timer>(timer: T, config: &TimerConfig) -> NtResult<Arc<T>> {
+    //...
+}
 
 
 
@@ -101,9 +137,8 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
         print_driver_version(driver)?;
     }
 
-    // Set up the device add callback
-    driver.set_evt_device_add(evt_device_add);
-
+    let _ = driver_init(MyDriver {})?;
+    
     trace("Trace: Safe Rust driver entry complete");
 
     Ok(())
@@ -123,7 +158,7 @@ impl Driver for MyDriver {
     fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
         println!("Enter evt_device_add");
 
-        self.device_create(device_init)
+        
     }
 }
 
@@ -138,17 +173,9 @@ impl MyDriver {
     /// this structure will be freed by the framework when the
     /// WdfDeviceCreate succeeds. So don't access the structure after
     /// that point.
-    fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
-        // Register pnp/power callbacks so that we can start and stop the
-        // timer as the device gets started and stopped.
-        let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
-        pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_self_managed_io_start);
-        pnp_power_callbacks.evt_device_self_managed_io_suspend =
-            Some(evt_device_self_managed_io_suspend);
-        pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_self_managed_io_start);
-
-        let device = Device::init(device_init, Some(pnp_power_callbacks))?;
-
+    fn device_init(device_init: &mut DeviceInit) -> NtResult<()> {     
+        let device = device_init(MyDevice {}, device_init)?
+       
         // Create a device interface so that applications can find us and talk
         // to us.
         let _ = device.create_device_interface(
@@ -156,7 +183,7 @@ impl MyDriver {
             None,
         )?;
 
-        self.queue_initialize(&device)
+        self.queue_init(&device)
     }
 
     /// The I/O dispatch callbacks for the frameworks device object
@@ -169,26 +196,24 @@ impl MyDriver {
     /// # Arguments
     ///
     /// * `device`` - Handle to a framework device object.
-    fn queue_initialize(device: &Device) -> NtResult<()> {
+    fn queue_init(device: &Device) -> NtResult<()> {
         // Create timer
-        let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 9_000, 0, false);
+        let timer_config = TimerConfig::new_periodic(&queue, 9_000, 0, false);
 
-        let timer = Timer::init(MyTimer {
+        let timer = timer_init(MyTimer {
             queue: queue.clone(),
         });
 
         // Create queue
         let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
-        queue_config.default_queue = true;
-        queue_config.evt_io_read = Some(evt_io_read);
-        queue_config.evt_io_write = Some(evt_io_write);
+        queue_config.default_queue = true; 
 
 
-        let queue = IoQueue::init(&device, &queue_config, MyQueue {
+        let queue = queue_init(MyQueue {
             request: SpinLock::create(None)?,
             buffer: SpinLock::create(None)?,
             timer,
-        }?;
+        }, &device, &queue_config)?;
 
         Ok(())
     }
