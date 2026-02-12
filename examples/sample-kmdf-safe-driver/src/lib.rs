@@ -157,8 +157,7 @@ impl Driver for MyDriver {
     /// * `device_init` - Reference to a framework-allocated `DeviceInit` structure.
     fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
         println!("Enter evt_device_add");
-
-        
+        self.device_init(device_init)
     }
 }
 
@@ -201,13 +200,12 @@ impl MyDriver {
         let timer_config = TimerConfig::new_periodic(&queue, 9_000, 0, false);
 
         let timer = timer_init(MyTimer {
-            queue: queue.clone(),
+            queue: None,
         });
 
         // Create queue
         let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
         queue_config.default_queue = true; 
-
 
         let queue = queue_init(MyQueue {
             request: SpinLock::create(None)?,
@@ -215,6 +213,7 @@ impl MyDriver {
             timer,
         }, &device, &queue_config)?;
 
+        timer.queue = Some(queue);
         Ok(())
     }
 }
@@ -300,7 +299,7 @@ impl IoQueue for MyQueue {
     ///   complete is with status success. So we will never get a zero length
     ///   request.
     fn evt_io_read(&&self, mut request: Request, length: usize) {
-        println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
+        println!("evt_io_read called. Queue {self:?}, Request {request:?} Length {length}");
 
         let memory = match request.retrieve_output_memory() {
             Ok(memory) => memory,
@@ -354,7 +353,7 @@ impl IoQueue for MyQueue {
     ///
     /// # Arguments
     ///
-    /// * `queue` - Handle to the framework queue object that is associated with the
+    /// * `self` - Handle to the framework queue object that is associated with the
     ///   I/O request.
     /// * `Request` - Handle to a framework request object.
     ///
@@ -363,7 +362,7 @@ impl IoQueue for MyQueue {
     ///   complete is with status success. So we will never get a zero length
     ///   request.
     fn evt_io_write(&self, request: Request, length: usize) {
-        println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
+        println!("evt_io_write called. Queue {self:?}, Request {request:?} Length {length}");
 
         if length > MAX_WRITE_LENGTH {
             println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
@@ -425,7 +424,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// Context object to be attached to a timer
 #[object_context(Timer)]
 struct MyTimer {
-    queue: Arc<IoQueue>,
+    queue: Option<Arc<IoQueue>>,
 }
 
 
@@ -445,7 +444,7 @@ impl Timer for MyTimer {
             return;
         };
 
-        let queue = &TimerContext::get(&timer).queue;
+        let queue = &TimerContext::get(&timer).queue.expect("queue must be set");;
 
         let req = QueueContext::get(queue).request.lock().take();
 
