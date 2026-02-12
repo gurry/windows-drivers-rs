@@ -50,7 +50,7 @@ use alloc::{vec, vec::Vec};
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
-///---- These traits are part of the wdf crate we supply ----
+///---- These traits and functions are part of the wdf crate we supply ----
 
 pub trait Driver {    
     fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
