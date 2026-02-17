@@ -224,6 +224,16 @@ impl DeviceInit {
             );
         }
     }
+
+    pub fn set_power_policy_ownership(&mut self, is_power_policy_owner: bool) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceInitSetPowerPolicyOwnership,
+                self.as_ptr_mut(),
+                is_power_policy_owner as BOOLEAN
+            );
+        }
+    }
 }
 
 pub struct IoTypeConfig {
