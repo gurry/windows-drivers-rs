@@ -13,6 +13,7 @@ pub mod string;
 pub mod sync;
 pub mod timer;
 pub mod tracing;
+pub mod work_item;
 
 use core::time::Duration;
 
@@ -31,6 +32,7 @@ pub use string::*;
 pub use sync::*;
 pub use timer::*;
 pub use wdf_macros::*;
+pub use work_item::*;
 pub use wdk::println;
 use wdk_sys::WDF_TRI_STATE;
 
