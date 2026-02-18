@@ -5,17 +5,22 @@ use wdk_sys::{
     NT_SUCCESS,
     PWDFMEMORY_OFFSET,
     WDF_IO_TARGET_SENT_IO_ACTION,
+    WDF_MEMORY_DESCRIPTOR,
     WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_REQUEST_SEND_OPTIONS,
     WDFIOTARGET,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
+    _WDF_REQUEST_SEND_OPTIONS_FLAGS,
     call_unsafe_wdf_function_binding,
 };
 
 use super::{
+    Timeout,
     device::Device,
     enum_mapping,
-    memory::{Memory, MemoryOffset, OwnedMemory},
+    init_wdf_struct,
+    memory::{Memory, MemoryDescriptor, MemoryDescriptorMut, MemoryOffset, OwnedMemory},
     object::{Handle, impl_ref_counted_handle},
     request::Request,
     result::{NtResult, StatusCodeExt, status_codes},
@@ -119,6 +124,100 @@ impl IoTarget {
             )
         }
         .ok()
+    }
+
+    /// Formats a request for a device I/O control operation.
+    ///
+    /// # Arguments
+    /// * `request` - The request to format
+    /// * `ioctl_code` - The I/O control code (IOCTL)
+    /// * `input_memory` - Optional input memory for the IOCTL
+    /// * `output_memory` - Optional output memory for the IOCTL
+    pub fn format_request_for_ioctl(
+        &self,
+        request: &mut Request,
+        ioctl_code: u32,
+        input_memory: RequestFormatMemory,
+        output_memory: RequestFormatMemory,
+    ) -> NtResult<()> {
+        let mut input_offset = WDFMEMORY_OFFSET::default();
+        let (input_ptr, input_offset_ptr) =
+            to_memory_ptrs(request, input_memory, &mut input_offset, true)?;
+
+        let mut output_offset = WDFMEMORY_OFFSET::default();
+        let (output_ptr, output_offset_ptr) =
+            to_memory_ptrs(request, output_memory, &mut output_offset, false)?;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoTargetFormatRequestForIoctl,
+                self.as_ptr().cast(),
+                request.as_ptr().cast(),
+                ioctl_code,
+                input_ptr.cast(),
+                input_offset_ptr,
+                output_ptr.cast(),
+                output_offset_ptr,
+            )
+        }
+        .ok()
+    }
+
+    /// Sends a device I/O control request synchronously.
+    ///
+    /// # Arguments
+    /// * `request` - Optional request object. If `None`, the framework
+    ///   uses an internal request object.
+    /// * `ioctl_code` - The I/O control code (IOCTL)
+    /// * `input_buffer` - Optional input buffer descriptor
+    /// * `output_buffer` - Optional output buffer descriptor
+    /// * `timeout` - Timeout for the request
+    ///
+    /// Returns the number of bytes returned by the target on success.
+    pub fn send_ioctl_synchronously(
+        &self,
+        request: Option<&Request>,
+        ioctl_code: u32,
+        input_buffer: Option<&MemoryDescriptor<'_>>,
+        output_buffer: Option<&mut MemoryDescriptorMut<'_>>,
+        timeout: Timeout,
+    ) -> NtResult<usize> {
+        let input_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
+            input_buffer.map(|b| b.into());
+        let input_descriptor_ptr = input_descriptor
+            .as_ref()
+            .map_or(ptr::null_mut(), |desc| {
+                (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
+            });
+
+        let output_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
+            output_buffer.map(|b| (&*b).into());
+        let output_descriptor_ptr = output_descriptor
+            .as_ref()
+            .map_or(ptr::null_mut(), |desc| {
+                (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
+            });
+
+        let mut send_options = init_wdf_struct!(WDF_REQUEST_SEND_OPTIONS);
+        send_options.Flags |=
+            _WDF_REQUEST_SEND_OPTIONS_FLAGS::WDF_REQUEST_SEND_OPTION_TIMEOUT as u32;
+        send_options.Timeout = timeout.as_wdf_timeout();
+
+        let mut bytes_returned: u64 = 0;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoTargetSendIoctlSynchronously,
+                self.as_ptr().cast(),
+                request.map_or(ptr::null_mut(), |r| r.as_ptr().cast()),
+                ioctl_code,
+                input_descriptor_ptr,
+                output_descriptor_ptr,
+                &mut send_options,
+                &mut bytes_returned,
+            )
+        }
+        .map(|| bytes_returned as usize)
     }
 }
 
