@@ -35,6 +35,7 @@ use super::{
     guid::Guid,
     init_wdf_struct,
     io_queue::IoQueue,
+    io_target::IoTarget,
     object::{Handle, impl_ref_counted_handle},
     request::RequestType,
     resource::CmResList,
@@ -115,6 +116,15 @@ impl Device {
         } else {
             None
         }
+    }
+
+    /// Returns a reference to the default I/O target for the device.
+    pub fn get_io_target(&self) -> &IoTarget {
+        let io_target = unsafe {
+            call_unsafe_wdf_function_binding!(WdfDeviceGetIoTarget, self.as_ptr().cast())
+        };
+
+        unsafe { &*(io_target.cast::<IoTarget>()) }
     }
 
     pub fn configure_request_dispatching(

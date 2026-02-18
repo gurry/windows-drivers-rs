@@ -6,6 +6,7 @@ use wdf_macros::object_context;
 use wdk_sys::{
     IO_STATUS_BLOCK,
     WDF_REQUEST_COMPLETION_PARAMS,
+    WDF_REQUEST_REUSE_PARAMS,
     WDF_REQUEST_TYPE,
     WDFCONTEXT,
     WDFIOTARGET,
@@ -21,7 +22,7 @@ use super::{
     io_queue::IoQueue,
     io_target::IoTarget,
     memory::{Memory, OwnedMemory},
-    object::Handle,
+    object::{Handle, init_attributes},
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
     sync::{Opaque, SpinLock},
 };
@@ -38,6 +39,48 @@ pub struct Request(WDFREQUEST);
 impl Request {
     pub(crate) unsafe fn from_raw(inner: WDFREQUEST) -> Self {
         Self(inner)
+    }
+
+    /// Creates a new WDF request object.
+    ///
+    /// The optional `io_target` parameter specifies the default
+    /// I/O target for the request. If `None`, the request is not
+    /// associated with any I/O target.
+    pub fn create(io_target: Option<&IoTarget>) -> NtResult<Self> {
+        let mut request: WDFREQUEST = ptr::null_mut();
+        let io_target_ptr = io_target.map_or(ptr::null_mut(), |t| t.as_ptr().cast());
+        let mut attributes = init_attributes();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestCreate,
+                &mut attributes,
+                io_target_ptr,
+                &mut request,
+            )
+        }
+        .map(|| unsafe { Self::from_raw(request) })
+    }
+
+    /// Reuses a previously created request object so it can be
+    /// sent to an I/O target again.
+    ///
+    /// The `status` parameter specifies the NTSTATUS value to set
+    /// in the reused request's IRP.
+    pub fn reuse(&mut self, status: NtStatus) -> NtResult<()> {
+        let mut reuse_params = init_wdf_struct!(WDF_REQUEST_REUSE_PARAMS);
+        reuse_params.Flags = 0; // WDF_REQUEST_REUSE_NO_FLAGS
+        reuse_params.Status = status.code();
+        reuse_params.NewIrp = ptr::null_mut();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestReuse,
+                self.as_ptr().cast(),
+                &mut reuse_params,
+            )
+        }
+        .ok()
     }
 
     pub fn id(&self) -> RequestId {
@@ -73,6 +116,16 @@ impl Request {
                 information as core::ffi::c_ulonglong
             )
         };
+    }
+
+    /// Returns the I/O status information value for the request.
+    pub fn get_information(&self) -> usize {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestGetInformation,
+                self.as_ptr().cast()
+            ) as usize
+        }
     }
 
     pub fn mark_cancellable<S: CancellableRequestStore>(
