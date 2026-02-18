@@ -170,7 +170,7 @@ impl UsbDevice {
 
     pub fn send_control_transfer_synchronously(
         &self,
-        request: Option<Request>,
+        request: Option<&Request>,
         transfer: &UsbControlTransfer<'_>,
         timeout: Timeout,
     ) -> NtResult<u32> {
