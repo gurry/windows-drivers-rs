@@ -282,7 +282,7 @@ pub fn evt_io_stop(
             );
             return;
         };
-        Request::cancel_sent_request(sent_request);
+        Request::cancel_sent_request(&sent_request);
     }
 }
 

@@ -280,7 +280,7 @@ impl Request {
         }
     }
 
-    pub fn cancel_sent_request(sent_request: SentRequest) -> bool {
+    pub fn cancel_sent_request(sent_request: &SentRequest) -> bool {
         let request_ptr = sent_request.as_ptr() as WDFREQUEST;
         let res =
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
