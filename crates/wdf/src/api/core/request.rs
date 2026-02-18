@@ -23,7 +23,7 @@ use super::{
     io_target::IoTarget,
     memory::{Memory, OwnedMemory},
     object::{Handle, init_attributes},
-    result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
+    result::{NtResult, NtStatus, NtStatusError, StatusCodeExt, status_codes},
     sync::{Opaque, SpinLock},
 };
 use crate::usb::UsbRequestCompletionParams;
@@ -67,7 +67,12 @@ impl Request {
     ///
     /// The `status` parameter specifies the NTSTATUS value to set
     /// in the reused request's IRP.
-    pub fn reuse(&mut self, status: NtStatus) -> NtResult<()> {
+    /// 
+    /// # Returns
+    /// 
+    /// A tuple containing the input and output user memory associated
+    /// with the request from earlier, if any.
+    pub fn reuse(&mut self, status: NtStatus) -> NtResult<(Option<OwnedMemory>, Option<OwnedMemory>)> {
         let mut reuse_params = init_wdf_struct!(WDF_REQUEST_REUSE_PARAMS);
         reuse_params.Flags = 0; // WDF_REQUEST_REUSE_NO_FLAGS
         reuse_params.Status = status.code();
@@ -80,7 +85,9 @@ impl Request {
                 &mut reuse_params,
             )
         }
-        .ok()
+        .map(|| {  
+            (unsafe { self.retrieve_user_input_memory() }, unsafe { self.retrieve_user_output_memory() })
+        })
     }
 
     pub fn id(&self) -> RequestId {
@@ -437,18 +444,35 @@ macro_rules! define_user_memory_context {
         }
 
         impl Request {
-            // TODO: commented out for now to silence unused warnings.
-            // Uncomment when it's actually used
-            // pub(crate) fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
-            //     let context = $ctx_name::get_mut(self);
-            //     context.memory.take()
-            // }
+            /// Extracts user memory if available
+            /// 
+            /// # Safety
+            /// 
+            /// It is possible the formatting info in WDFREQUEST is
+            /// refrencing this memory. Make sure the request is not
+            /// formatted before calling this method. Because of this
+            /// the best place to call it is in from [`reuse`] method
+            /// above because it clears the formatting info
+            unsafe fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
+                let context = $ctx_name::get_mut(self);
+                context.memory.take()
+            }
 
+            /// Sets the user memory for this request. This is used in when request
+            /// is sent to an I/O target and the driver needs to keep the user memory alive until
+            /// the completion routine is called.
             pub(crate) fn $set_fn(&mut self, memory: OwnedMemory) -> NtResult<()> {
                 match $ctx_name::try_get_mut(self) {
                     Some(context) => {
-                        context.memory = Some(memory);
-                        Ok(())
+                        if context.memory.is_some() {
+                            // We cannot allow overrwriting an already existing user memory
+                            // as it may be being referenced to from formatting info within
+                            // WDFREQUEST and that would cause a dangling reference.
+                            Err(NtStatusError::from(status_codes::STATUS_INVALID_DEVICE_REQUEST))
+                        } else {
+                            context.memory = Some(memory);
+                            Ok(())
+                        }
                     }
                     None => $ctx_name::attach(self, $ctx_name { memory: Some(memory) }),
                 }
