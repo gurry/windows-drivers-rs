@@ -64,7 +64,6 @@ impl<T> SpinLock<T> {
         }
         SpinLockGuard {
             spin_lock: self,
-            _no_sync_send: PhantomData,
         }
     }
 }
@@ -85,13 +84,6 @@ impl<T> Drop for SpinLock<T> {
 /// is dropped.
 pub struct SpinLockGuard<'a, T> {
     spin_lock: &'a SpinLock<T>,
-
-    // This marker makes SpinLockGuard !Sync and !Send.
-    // !Send is needed to ensure that the same
-    // thread that acquired the lock releases it.
-    // !Sync is not needed but you can't avoid it
-    // with PhantomData
-    _no_sync_send: PhantomData<*const ()>,
 }
 
 impl<'a, T> Drop for SpinLockGuard<'a, T> {
