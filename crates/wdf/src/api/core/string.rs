@@ -67,14 +67,14 @@ impl WString {
         unicode_string
     }
 
-    pub fn to_rust_string(&self) -> Option<String> {
+    pub fn to_rust_string_lossy(&self) -> Option<String> {
         let unicode_string = self.get_unicode_string();
 
         if unicode_string.Buffer.is_null() {
             return None;
         }
 
-        Some(to_rust_str(unicode_string))
+        Some(to_string_lossy(unicode_string))
     }
 }
 
@@ -119,8 +119,8 @@ impl UnicodeString {
         }
     }
 
-    pub fn to_rust_string(&self) -> String {
-        to_rust_str(self.unicode_str)
+    pub fn to_string_lossy(&self) -> String {
+        to_string_lossy(self.unicode_str)
     }
 
     pub fn as_raw(&self) -> &UNICODE_STRING {
@@ -145,7 +145,7 @@ impl UnicodeString {
     }
 }
 
-pub fn to_rust_str(unicode_str: UNICODE_STRING) -> String {
+pub fn to_string_lossy(unicode_str: UNICODE_STRING) -> String {
     let unicode_slice =
         unsafe { core::slice::from_raw_parts(unicode_str.Buffer, unicode_str.Length as usize / 2) };
     String::from_utf16_lossy(unicode_slice)

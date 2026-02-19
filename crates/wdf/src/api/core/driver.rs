@@ -27,7 +27,7 @@ use super::{
     init_wdf_struct,
     object::Handle,
     result::{NtResult, status_codes},
-    string::{WString, to_rust_str},
+    string::{WString, to_string_lossy},
     tracing::TraceWriter,
 };
 use crate::println;
@@ -58,7 +58,7 @@ impl Driver {
         }
 
         Ok(string
-            .to_rust_string()
+            .to_rust_string_lossy()
             .expect("version string should exist"))
     }
 
@@ -253,7 +253,7 @@ pub fn call_safe_driver_entry(
         //         * a valid pointer to a `UNICODE_STRING`
         unsafe { *reg_path };
 
-    let reg_path = to_rust_str(reg_path);
+    let reg_path = to_string_lossy(reg_path);
     match safe_entry(&mut safe_driver, &reg_path) {
         Ok(_) => {
             if let Some(evt_device_add) = safe_driver.evt_device_add {
