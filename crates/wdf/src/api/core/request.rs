@@ -380,6 +380,20 @@ impl Request {
 
         Ok(RequestContext::get_mut(self))
     }
+
+    /// Returns a pointer to the WDM IRP associated with this
+    /// request.
+    /// TODO: callers can do real damage through the raw IRP
+    /// pointer. We would want to wrap it in safe abstractions
+    /// or get rid of this function entirely.
+    pub fn wdm_get_irp(&self) -> wdk_sys::PIRP {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestWdmGetIrp,
+                self.as_ptr().cast(),
+            )
+        }
+    }
 }
 
 impl Handle for Request {
