@@ -9,9 +9,10 @@ use core::{
 };
 
 use wdk::println;
-use wdk_sys::{WDFOBJECT, WDFSPINLOCK, call_unsafe_wdf_function_binding};
+use wdk_sys::{WDFOBJECT, WDFSPINLOCK, WDFWAITLOCK, call_unsafe_wdf_function_binding};
 
 use super::{
+    Timeout,
     object::{Handle, RefCountedHandle, bug_check, init_attributes},
     result::{NtResult, StatusCodeExt},
 };
@@ -103,7 +104,7 @@ impl<'a, T> Drop for SpinLockGuard<'a, T> {
     }
 }
 
-impl<'a, T> core::ops::Deref for SpinLockGuard<'a, T> {
+impl<'a, T> Deref for SpinLockGuard<'a, T> {
     type Target = T;
 
     #[inline(always)]
@@ -112,10 +113,135 @@ impl<'a, T> core::ops::Deref for SpinLockGuard<'a, T> {
     }
 }
 
-impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
+impl<'a, T> DerefMut for SpinLockGuard<'a, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.spin_lock.data.get() }
+    }
+}
+
+/// WDF Wait Lock
+pub struct WaitLock<T> {
+    wdf_wait_lock: WDFWAITLOCK,
+    data: UnsafeCell<T>,
+}
+
+/// `WaitLock` requires `T` to be `Send` because non-`Send`
+/// types can lead to situations where a thread NOT holding
+/// the lock can also access the data. An example of this
+/// is `Rc` wherein the lock will protect only one clone of
+/// `Rc` and another thread can still access the data through
+/// another clone without taking the lock.
+unsafe impl<T> Sync for WaitLock<T> where T: Send {}
+
+impl<T> WaitLock<T> {
+    /// Construct a WDF Wait Lock object with data.
+    pub fn create(data: T) -> NtResult<Self> {
+        let mut wait_lock = Self {
+            wdf_wait_lock: core::ptr::null_mut(),
+            data: UnsafeCell::new(data),
+        };
+
+        let mut attributes = init_attributes();
+
+        // SAFETY: The resulting ffi object is stored in a private member and not
+        // accessible outside of this module, and this module guarantees that it is
+        // always in a valid state.
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfWaitLockCreate,
+                &mut attributes,
+                &mut wait_lock.wdf_wait_lock,
+            )
+        }
+        .map(|| wait_lock)
+    }
+
+    /// Acquire the wait lock, blocking indefinitely until it
+    /// becomes available.
+    ///
+    /// Returns a guard that releases the lock when dropped.
+    pub fn lock(&self) -> WaitLockGuard<'_, T> {
+        // SAFETY: `wdf_wait_lock` is a private member, originally created
+        // by WDF, and this module guarantees that it is always in a valid state.
+        // Passing null for the timeout means wait indefinitely, which always
+        // succeeds.
+        let _ = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfWaitLockAcquire,
+                self.wdf_wait_lock,
+                core::ptr::null_mut(),
+            )
+        };
+        WaitLockGuard { wait_lock: self }
+    }
+
+    /// Try to acquire the wait lock with a timeout.
+    ///
+    /// Returns `Some(guard)` if the lock was acquired, or `None`
+    /// if the timeout elapsed.
+    pub fn try_lock(&self, timeout: Timeout) -> Option<WaitLockGuard<'_, T>> {
+        let mut timeout_value = timeout.as_wdf_timeout();
+
+        // SAFETY: `wdf_wait_lock` is a private member, originally created
+        // by WDF, and this module guarantees that it is always in a valid state.
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfWaitLockAcquire,
+                self.wdf_wait_lock,
+                &mut timeout_value,
+            )
+        };
+
+        if status.is_success() {
+            Some(WaitLockGuard { wait_lock: self })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T> Drop for WaitLock<T> {
+    fn drop(&mut self) {
+        // SAFETY: `wdf_wait_lock` is a private member, originally created
+        // by WDF, and this module guarantees that it is always in a valid state.
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.wdf_wait_lock.cast());
+        }
+    }
+}
+
+/// RAII guard for [`WaitLock`].
+///
+/// The lock is acquired when the guard is created and released when the guard
+/// is dropped.
+pub struct WaitLockGuard<'a, T> {
+    wait_lock: &'a WaitLock<T>,
+}
+
+impl<'a, T> Drop for WaitLockGuard<'a, T> {
+    fn drop(&mut self) {
+        // SAFETY: `wdf_wait_lock` is a private member, originally created
+        // by WDF, and this module guarantees that it is always in a valid state.
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfWaitLockRelease, self.wait_lock.wdf_wait_lock);
+        }
+    }
+}
+
+impl<'a, T> Deref for WaitLockGuard<'a, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.wait_lock.data.get() }
+    }
+}
+
+impl<'a, T> DerefMut for WaitLockGuard<'a, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.wait_lock.data.get() }
     }
 }
 
