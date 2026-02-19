@@ -62,34 +62,6 @@ impl Request {
         .map(|| unsafe { Self::from_raw(request) })
     }
 
-    /// Reuses a previously created request object so it can be
-    /// sent to an I/O target again.
-    ///
-    /// The `status` parameter specifies the NTSTATUS value to set
-    /// in the reused request's IRP.
-    /// 
-    /// # Returns
-    /// 
-    /// A tuple containing the input and output user memory associated
-    /// with the request from earlier, if any.
-    pub fn reuse(&mut self, status: NtStatus) -> NtResult<(Option<OwnedMemory>, Option<OwnedMemory>)> {
-        let mut reuse_params = init_wdf_struct!(WDF_REQUEST_REUSE_PARAMS);
-        reuse_params.Flags = 0; // WDF_REQUEST_REUSE_NO_FLAGS
-        reuse_params.Status = status.code();
-        reuse_params.NewIrp = ptr::null_mut();
-
-        unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestReuse,
-                self.as_ptr().cast(),
-                &mut reuse_params,
-            )
-        }
-        .map(|| {  
-            (unsafe { self.retrieve_user_input_memory() }, unsafe { self.retrieve_user_output_memory() })
-        })
-    }
-
     pub fn id(&self) -> RequestId {
         RequestId(self.0 as usize)
     }
@@ -346,6 +318,34 @@ impl Request {
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
 
         res != 0
+    }
+
+    /// Reuses a previously created request object so it can be
+    /// sent to an I/O target again.
+    ///
+    /// The `status` parameter specifies the NTSTATUS value to set
+    /// in the reused request's IRP.
+    /// 
+    /// # Returns
+    /// 
+    /// A tuple containing the input and output user memory associated
+    /// with the request from earlier, if any.
+    pub fn reuse(&mut self, status: NtStatus) -> NtResult<(Option<OwnedMemory>, Option<OwnedMemory>)> {
+        let mut reuse_params = init_wdf_struct!(WDF_REQUEST_REUSE_PARAMS);
+        reuse_params.Flags = 0; // WDF_REQUEST_REUSE_NO_FLAGS
+        reuse_params.Status = status.code();
+        reuse_params.NewIrp = ptr::null_mut();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestReuse,
+                self.as_ptr().cast(),
+                &mut reuse_params,
+            )
+        }
+        .map(|| {  
+            (unsafe { self.retrieve_user_input_memory() }, unsafe { self.retrieve_user_output_memory() })
+        })
     }
 
     fn get_context_mut_or_attach_new(&mut self) -> NtResult<&mut RequestContext> {
