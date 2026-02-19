@@ -6,6 +6,7 @@ use wdf_macros::object_context;
 use wdk_sys::{
     IO_STATUS_BLOCK,
     WDF_REQUEST_COMPLETION_PARAMS,
+    WDF_REQUEST_PARAMETERS,
     WDF_REQUEST_REUSE_PARAMS,
     WDF_REQUEST_TYPE,
     WDFCONTEXT,
@@ -105,6 +106,24 @@ impl Request {
                 self.as_ptr().cast()
             ) as usize
         }
+    }
+
+    /// Retrieves the parameters associated with the request.
+    pub fn get_parameters(&self) -> RequestParameters {
+        let mut params = WDF_REQUEST_PARAMETERS {
+            Size: core::mem::size_of::<WDF_REQUEST_PARAMETERS>() as u16,
+            ..WDF_REQUEST_PARAMETERS::default()
+        };
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestGetParameters,
+                self.as_ptr().cast(),
+                &mut params,
+            );
+        }
+
+        RequestParameters(params)
     }
 
     pub fn mark_cancellable<S: CancellableRequestStore>(
@@ -732,6 +751,63 @@ impl RequestCompletionToken {
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(usize);
+
+/// Request parameters returned by [`Request::get_parameters`] method
+#[derive(Copy, Clone)]
+pub struct RequestParameters(WDF_REQUEST_PARAMETERS);
+
+impl RequestParameters {
+    /// Returns the request type.
+    pub fn request_type(&self) -> RequestType {
+        self.0.Type.into()
+    }
+
+    /// Returns the minor function code, if any.
+    pub fn minor_function(&self) -> u8 {
+        self.0.MinorFunction
+    }
+
+    /// Returns the IOCTL code for a device I/O control request,
+    /// or `None` if the request type is not
+    /// [`RequestType::DeviceControl`] or
+    /// [`RequestType::DeviceControlInternal`].
+    pub fn ioctl_code(&self) -> Option<u32> {
+        self.is_device_io_control()
+            .then(|| unsafe { self.0.Parameters.DeviceIoControl.IoControlCode })
+    }
+
+    /// Returns the input buffer length for a device I/O control
+    /// request, or `None` if the request type is not
+    /// [`RequestType::DeviceControl`] or
+    /// [`RequestType::DeviceControlInternal`].
+    pub fn ioctl_input_buffer_length(&self) -> Option<usize> {
+        self.is_device_io_control()
+            .then(|| unsafe { self.0.Parameters.DeviceIoControl.InputBufferLength })
+    }
+
+    /// Returns the output buffer length for a device I/O control
+    /// request, or `None` if the request type is not
+    /// [`RequestType::DeviceControl`] or
+    /// [`RequestType::DeviceControlInternal`].
+    pub fn ioctl_output_buffer_length(&self) -> Option<usize> {
+        self.is_device_io_control()
+            .then(|| unsafe { self.0.Parameters.DeviceIoControl.OutputBufferLength })
+    }
+
+    /// Returns the raw `WDF_REQUEST_PARAMETERS` struct.
+    pub fn as_raw(&self) -> &WDF_REQUEST_PARAMETERS {
+        &self.0
+    }
+
+    /// Returns `true` if the request type is a device I/O control
+    /// request.
+    fn is_device_io_control(&self) -> bool {
+        matches!(
+            self.request_type(),
+            RequestType::DeviceControl | RequestType::DeviceControlInternal
+        )
+    }
+}
 
 enum_mapping! {
     infallible;

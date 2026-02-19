@@ -9,6 +9,7 @@ use wdk_sys::{
     DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
+    WDF_DEVICE_FAILED_ACTION,
     WDF_DEVICE_IO_TYPE,
     WDF_DEVICE_PNP_CAPABILITIES,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
@@ -37,6 +38,7 @@ use super::{
     io_queue::IoQueue,
     io_target::IoTarget,
     object::{Handle, impl_ref_counted_handle},
+    registry_key::{RegistryAccessRights, RegistryKey},
     request::RequestType,
     resource::CmResList,
     result::{NtResult, StatusCodeExt, to_status_code},
@@ -209,9 +211,76 @@ impl Device {
                 wdf_string.as_ptr().cast(),
             )
         }
-        .and_then(|| Ok(wdf_string))
+        .map(|| wdf_string)
+    }
+
+    /// Opens a registry key for the device.
+    pub fn open_registry_key(
+        &self,
+        key_type: DeviceInstanceKeyType,
+        access: RegistryAccessRights,
+    ) -> NtResult<RegistryKey> {
+        let mut key: wdk_sys::WDFKEY = core::ptr::null_mut();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceOpenRegistryKey,
+                self.as_ptr().cast(),
+                key_type.into(),
+                access.into(),
+                WDF_NO_OBJECT_ATTRIBUTES,
+                &mut key,
+            )
+        }
+        .map(|| unsafe { RegistryKey::from_raw(key) })
+    }
+
+    /// Indicates that the device has encountered a hardware or
+    /// software error, allowing the framework to either attempt
+    /// a restart or leave the device disabled.
+    ///
+    /// Wraps [`WdfDeviceSetFailed`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nf-wdfdevice-wdfdevicesetfailed).
+    pub fn set_failed(&self, failed_action: DeviceFailedAction) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceSetFailed,
+                self.as_ptr().cast(),
+                failed_action.into(),
+            );
+        }
     }
 }
+
+enum_mapping! {
+    infallible;
+    pub enum DeviceFailedAction: WDF_DEVICE_FAILED_ACTION {
+        AttemptRestart = WdfDeviceFailedAttemptRestart,
+        NoRestart = WdfDeviceFailedNoRestart,
+    }
+}
+
+/// The type of device registry key
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DeviceInstanceKeyType {
+    /// The device's hardware key (PLUGPLAY_REGKEY_DEVICE).
+    Device,
+    /// The device's software key (PLUGPLAY_REGKEY_DRIVER).
+    Driver,
+    /// The current hardware profile key (PLUGPLAY_REGKEY_CURRENT_HWPROFILE).
+    CurrentHwProfile,
+}
+
+impl From<DeviceInstanceKeyType> for u32 {
+    fn from(value: DeviceInstanceKeyType) -> Self {
+        match value {
+            DeviceInstanceKeyType::Device => wdk_sys::PLUGPLAY_REGKEY_DEVICE,
+            DeviceInstanceKeyType::Driver => wdk_sys::PLUGPLAY_REGKEY_DRIVER,
+            DeviceInstanceKeyType::CurrentHwProfile => wdk_sys::PLUGPLAY_REGKEY_CURRENT_HWPROFILE,
+        }
+    }
+}
+
+
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
 
