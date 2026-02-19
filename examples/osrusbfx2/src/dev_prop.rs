@@ -79,10 +79,10 @@ fn set_device_interface_property_data(
         return Err(NtStatusError::from(status_codes::STATUS_NOT_SUPPORTED));
     };
 
-    let mut symbolic_link_name = symbolic_link_name.get_unicode_string();
+    let symbolic_link_name = symbolic_link_name.get_unicode_string();
 
     let status = set_device_interface_property_data(
-        &mut symbolic_link_name as *mut UNICODE_STRING,
+        (symbolic_link_name.as_raw() as *const UNICODE_STRING).cast_mut(),
         property_key as *const DEVPROPKEY as PDEVPROPKEY,
         0, // lcid
         0, // flags

@@ -51,7 +51,7 @@ impl WString {
         }
     }
 
-    pub fn get_unicode_string(&self) -> UNICODE_STRING {
+    pub fn get_unicode_string<'a>(&'a self) -> UnicodeStringRef<'a> {
         let mut unicode_string = UNICODE_STRING::default();
 
         // SAFETY: The contract of the `Wstring` constructor
@@ -64,17 +64,11 @@ impl WString {
             )
         }
 
-        unicode_string
+        unsafe { UnicodeStringRef::from_raw(unicode_string) }
     }
 
-    pub fn to_rust_string_lossy(&self) -> Option<String> {
-        let unicode_string = self.get_unicode_string();
-
-        if unicode_string.Buffer.is_null() {
-            return None;
-        }
-
-        Some(to_string_lossy(unicode_string))
+    pub fn to_rust_string_lossy(&self) -> String {
+        self.get_unicode_string().to_string_lossy()
     }
 }
 
@@ -150,3 +144,25 @@ pub fn to_string_lossy(unicode_str: UNICODE_STRING) -> String {
         unsafe { core::slice::from_raw_parts(unicode_str.Buffer, unicode_str.Length as usize / 2) };
     String::from_utf16_lossy(unicode_slice)
 }
+
+pub struct UnicodeStringRef<'a> {
+    unicode_str: UNICODE_STRING,
+    _marker: core::marker::PhantomData<&'a ()>, // Marker to tie the lifetime to the buffer
+}
+
+impl<'a> UnicodeStringRef<'a> {
+    pub(crate) unsafe fn from_raw(unicode_str: UNICODE_STRING) -> Self {
+        Self {
+            unicode_str,
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    pub fn to_string_lossy(&self) -> String {
+        to_string_lossy(self.unicode_str)
+    }
+
+    pub fn as_raw(&self) -> &UNICODE_STRING {
+        &self.unicode_str
+    }
+}   
