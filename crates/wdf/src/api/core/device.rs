@@ -6,6 +6,8 @@ use core::{
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     BOOLEAN,
+    DEVPROPKEY,
+    DEVPROPTYPE,
     DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
@@ -14,6 +16,7 @@ use wdk_sys::{
     WDF_DEVICE_PNP_CAPABILITIES,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
+    WDF_DEVICE_PROPERTY_DATA,
     WDF_IO_TYPE_CONFIG,
     WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
@@ -41,7 +44,7 @@ use super::{
     registry_key::{RegistryAccessRights, RegistryKey},
     request::RequestType,
     resource::CmResList,
-    result::{NtResult, StatusCodeExt, to_status_code},
+    result::{NtResult, NtStatusError, StatusCodeExt, status_codes, to_status_code},
     string::{UnicodeString, WString},
 };
 
@@ -238,8 +241,6 @@ impl Device {
     /// Indicates that the device has encountered a hardware or
     /// software error, allowing the framework to either attempt
     /// a restart or leave the device disabled.
-    ///
-    /// Wraps [`WdfDeviceSetFailed`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nf-wdfdevice-wdfdevicesetfailed).
     pub fn set_failed(&self, failed_action: DeviceFailedAction) {
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -249,13 +250,70 @@ impl Device {
             );
         }
     }
-}
 
-enum_mapping! {
-    infallible;
-    pub enum DeviceFailedAction: WDF_DEVICE_FAILED_ACTION {
-        AttemptRestart = WdfDeviceFailedAttemptRestart,
-        NoRestart = WdfDeviceFailedNoRestart,
+    /// Queries a device property.
+    ///
+    /// The caller supplies the buffer. On success, returns the
+    /// property type. If the buffer is too small, returns
+    /// [`QueryPropertyError::BufferTooSmall`] containing the
+    /// required size in bytes.
+    ///
+    /// # Example (two-pass pattern)
+    /// ```ignore
+    /// let prop_data = DevicePropertyData::new(my_key);
+    ///
+    /// // First call: get required size.
+    /// let required_size = match device.query_property_ex(
+    ///     &prop_data, &mut [],
+    /// ) {
+    ///     Err(QueryPropertyError::BufferTooSmall(size)) => size,
+    ///     other => panic!("expected BufferTooSmall"),
+    /// };
+    ///
+    /// // Second call: retrieve the data.
+    /// let mut buffer = vec![0u8; required_size as usize];
+    /// let property_type = device.query_property_ex(
+    ///     &prop_data, &mut buffer,
+    /// )?;
+    /// ```
+    pub fn query_property_ex(
+        &self,
+        property_data: &DevicePropertyData,
+        buffer: &mut [u8],
+    ) -> Result<DevicePropertyType, QueryPropertyError> {
+        let raw_key: DEVPROPKEY = property_data.property_key.into();
+        let mut raw_property_data = init_wdf_struct!(WDF_DEVICE_PROPERTY_DATA);
+        raw_property_data.PropertyKey = &raw_key as *const DEVPROPKEY;
+        raw_property_data.Lcid = property_data.lcid;
+        raw_property_data.Flags = property_data.flags;
+
+        let buffer_len = buffer.len() as u32;
+        let buffer_ptr = buffer.as_mut_ptr().cast();
+
+        let mut required_size: u32 = 0;
+        let mut property_type: DEVPROPTYPE = 0;
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceQueryPropertyEx,
+                self.as_ptr().cast(),
+                &mut raw_property_data,
+                buffer_len,
+                buffer_ptr,
+                &mut required_size,
+                &mut property_type,
+            )
+        };
+
+        if status == status_codes::STATUS_BUFFER_TOO_SMALL {
+            return Err(QueryPropertyError::BufferTooSmall(required_size));
+        }
+
+        if status.is_success() {
+            Ok(DevicePropertyType(property_type))
+        } else {
+            Err(QueryPropertyError::NtStatus(NtStatusError::from(status)))
+        }
     }
 }
 
@@ -280,7 +338,134 @@ impl From<DeviceInstanceKeyType> for u32 {
     }
 }
 
+enum_mapping! {
+    infallible;
+    pub enum DeviceFailedAction: WDF_DEVICE_FAILED_ACTION {
+        AttemptRestart = WdfDeviceFailedAttemptRestart,
+        NoRestart = WdfDeviceFailedNoRestart,
+    }
+}
 
+/// Error type returned by [`Device::query_property_ex`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryPropertyError {
+    /// The supplied buffer was too small. Contains the required
+    /// size in bytes.
+    BufferTooSmall(u32),
+    /// An NT status error other than buffer-too-small.
+    NtStatus(NtStatusError),
+}
+
+impl From<NtStatusError> for QueryPropertyError {
+    fn from(e: NtStatusError) -> Self {
+        QueryPropertyError::NtStatus(e)
+    }
+}
+
+/// Safe wrapper around `DEVPROPTYPE`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DevicePropertyType(DEVPROPTYPE);
+
+impl DevicePropertyType {
+    pub const EMPTY: Self = Self(wdk_sys::DEVPROP_TYPE_EMPTY);
+    pub const NULL: Self = Self(wdk_sys::DEVPROP_TYPE_NULL);
+    pub const SBYTE: Self = Self(wdk_sys::DEVPROP_TYPE_SBYTE);
+    pub const BYTE: Self = Self(wdk_sys::DEVPROP_TYPE_BYTE);
+    pub const INT16: Self = Self(wdk_sys::DEVPROP_TYPE_INT16);
+    pub const UINT16: Self = Self(wdk_sys::DEVPROP_TYPE_UINT16);
+    pub const INT32: Self = Self(wdk_sys::DEVPROP_TYPE_INT32);
+    pub const UINT32: Self = Self(wdk_sys::DEVPROP_TYPE_UINT32);
+    pub const INT64: Self = Self(wdk_sys::DEVPROP_TYPE_INT64);
+    pub const UINT64: Self = Self(wdk_sys::DEVPROP_TYPE_UINT64);
+    pub const FLOAT: Self = Self(wdk_sys::DEVPROP_TYPE_FLOAT);
+    pub const DOUBLE: Self = Self(wdk_sys::DEVPROP_TYPE_DOUBLE);
+    pub const DECIMAL: Self = Self(wdk_sys::DEVPROP_TYPE_DECIMAL);
+    pub const GUID: Self = Self(wdk_sys::DEVPROP_TYPE_GUID);
+    pub const CURRENCY: Self = Self(wdk_sys::DEVPROP_TYPE_CURRENCY);
+    pub const DATE: Self = Self(wdk_sys::DEVPROP_TYPE_DATE);
+    pub const FILETIME: Self = Self(wdk_sys::DEVPROP_TYPE_FILETIME);
+    pub const BOOLEAN: Self = Self(wdk_sys::DEVPROP_TYPE_BOOLEAN);
+    pub const STRING: Self = Self(wdk_sys::DEVPROP_TYPE_STRING);
+    pub const SECURITY_DESCRIPTOR: Self = Self(wdk_sys::DEVPROP_TYPE_SECURITY_DESCRIPTOR);
+    pub const SECURITY_DESCRIPTOR_STRING: Self =
+        Self(wdk_sys::DEVPROP_TYPE_SECURITY_DESCRIPTOR_STRING);
+    pub const DEVPROPKEY: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPKEY);
+    pub const DEVPROPTYPE: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPTYPE);
+    pub const ERROR: Self = Self(wdk_sys::DEVPROP_TYPE_ERROR);
+    pub const NTSTATUS: Self = Self(wdk_sys::DEVPROP_TYPE_NTSTATUS);
+    pub const STRING_INDIRECT: Self = Self(wdk_sys::DEVPROP_TYPE_STRING_INDIRECT);
+    pub const BINARY: Self = Self(wdk_sys::DEVPROP_TYPE_BINARY);
+    pub const STRING_LIST: Self = Self(wdk_sys::DEVPROP_TYPE_STRING_LIST);
+
+    /// Returns the raw `DEVPROPTYPE` value.
+    pub fn raw(&self) -> DEVPROPTYPE {
+        self.0
+    }
+
+    /// Returns the base type, stripping any array/list modifier.
+    pub fn base_type(&self) -> Self {
+        Self(self.0 & wdk_sys::DEVPROP_MASK_TYPE)
+    }
+
+    /// Returns `true` if this is an array type.
+    pub fn is_array(&self) -> bool {
+        self.0 & wdk_sys::DEVPROP_TYPEMOD_ARRAY != 0
+    }
+
+    /// Returns `true` if this is a list type.
+    pub fn is_list(&self) -> bool {
+        self.0 & wdk_sys::DEVPROP_TYPEMOD_LIST != 0
+    }
+}
+
+/// Safe wrapper around `DEVPROPKEY`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DevicePropertyKey {
+    /// The property category GUID.
+    pub fmtid: Guid,
+    /// The property identifier within the category.
+    pub pid: u32,
+}
+
+impl DevicePropertyKey {
+    /// Creates a new `DevicePropertyKey` from a GUID and property
+    /// identifier.
+    pub const fn new(fmtid: Guid, pid: u32) -> Self {
+        Self { fmtid, pid }
+    }
+}
+
+impl From<DevicePropertyKey> for DEVPROPKEY {
+    fn from(key: DevicePropertyKey) -> Self {
+        DEVPROPKEY {
+            fmtid: key.fmtid.to_raw(),
+            pid: key.pid,
+        }
+    }
+}
+
+/// Device property data used as a parameter for querying
+/// device properties (e.g. with [`Device::query_property_ex`]).
+pub struct DevicePropertyData {
+    /// The property key to query.
+    pub property_key: DevicePropertyKey,
+    /// The locale identifier. Use `0` for default.
+    pub lcid: u32,
+    /// Flags. Use `0` for default.
+    pub flags: u32,
+}
+
+impl DevicePropertyData {
+    /// Creates a new `DevicePropertyData` from a property key
+    /// with default locale and flags.
+    pub fn new(property_key: DevicePropertyKey) -> Self {
+        Self {
+            property_key,
+            lcid: 0,
+            flags: 0,
+        }
+    }
+}
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
 
