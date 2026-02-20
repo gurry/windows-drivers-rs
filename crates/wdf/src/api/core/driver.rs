@@ -1,5 +1,8 @@
-use alloc::string::String;
-use core::{cell::UnsafeCell, ptr};
+use alloc::{boxed::Box, string::String};
+use core::{
+    ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 #[doc(hidden)]
 pub use wdk_sys::{
@@ -26,13 +29,16 @@ use super::{
     guid::Guid,
     init_wdf_struct,
     object::{Handle, impl_handle},
-    result::{NtResult, StatusCodeExt, status_codes},
+    result::{NtResult, StatusCodeExt},
     string::{UnicodeString, WString},
     tracing::TraceWriter,
 };
 use crate::println;
 
-static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
+/// Global pointer to the heap-allocated `TraceWriter`.
+/// Written once during driver entry (before any concurrent access),
+/// read from `trace()` and `clean_up_tracing()` afterwards.
+static TRACE_WRITER: AtomicPtr<TraceWriter> = AtomicPtr::new(ptr::null_mut());
 
 /// A safe wrapper around `DRIVER_OBJECT`
 #[repr(transparent)]
@@ -145,106 +151,14 @@ impl Driver {
     }
 }
 
-/// A container like [`core::cell::OnceCell`] that is
-/// set once and read multiple times.
-///
-/// # Safety
-/// The reason this type has the prefix `Unsafe` in its name
-/// is because it is not thread safe. To use it safely
-/// the user must uphold the following invariants:
-/// - The [`set`] method must not be called concurrently with itself or the
-///   [`get`] method.
-/// - The `get` method must not be called concurrently with the `set` method.
-///
-/// The typical pattern is to call `set` first from
-/// a single thread and initialize the value, and then
-/// call `get` from multiple threads as needed.
-///
-/// `UnsafeOnceCell` implements `Sync` but only to allow it to
-/// be used in certain static variables in this module. In
-/// reality it is not `Sync` under all conditions. It is `Sync`
-/// only when the above-mentioned invariants are maintained.
-/// Therefore **do not use it in contexts which require that
-/// it is always `Sync`**.
-///
-/// More broadly speaking `UnsafeOnceCell` is NOT a
-/// general-purpose type. It is meant to be used only in the way it is used
-/// right now wherein instances of it are placed in static variables,
-/// the driver entry function -- and only the driver entry
-/// function -- calls `set` and other methods in this module
-/// call `get` only after driver entry is finished. Therefore
-/// **please do not use it for any other purpose and be careful
-/// when changing it or any of the code that uses it**.
-///
-/// We could have made it thread-safe and avoid all of
-/// the above constraints but that would have meant that every
-/// access to it requires an atomic operation which is bad for
-/// performance because values stored in it are meant to be
-/// accessed very frequently such as from tracing calls.
-struct UnsafeOnceCell<T> {
-    val: UnsafeCell<Option<T>>,
-}
-
-impl<T> UnsafeOnceCell<T> {
-    /// Creates a new `UnsafeOnceCell` instance
-    pub const fn new() -> Self {
-        Self {
-            val: UnsafeCell::new(None),
-        }
-    }
-
-    /// Returns a reference to the value.
-    ///
-    /// # Safety
-    /// This method will causes data races if
-    /// called concurrently with the [`set`]
-    /// method. It is safe to be called
-    /// concurrently with itself however.
-    pub unsafe fn get(&self) -> Option<&T> {
-        // SAFETY: Safe because we assume that the call to this method
-        // is not concurrent with the `set` method. This is true
-        let val_ref = unsafe { &*self.val.get() };
-        val_ref.as_ref()
-    }
-
-    /// Sets the value if it has not been already set
-    ///
-    /// # Returns
-    /// Returns `Ok(())` if the value was set successfully,
-    /// or an `Err(NtError)` if it was already set.
-    ///
-    /// # Safety
-    /// This method will cause data races if called
-    /// concurrently with itself or the [`get`] method.
-    pub unsafe fn set(&self, val: T) -> NtResult<()> {
-        // SAFETY: Safe because we assume that the call to this method
-        // is not concurrent with itself or the `get` method.
-        unsafe {
-            let val_ptr = self.val.get();
-            if (*val_ptr).is_some() {
-                return Err(status_codes::STATUS_UNSUCCESSFUL.into());
-            }
-            *val_ptr = Some(val);
-        };
-        Ok(())
-    }
-}
-
-/// This type is `Sync` if `T` is `Sync` AND if the
-/// safety invariants stated on the `UnsafeOnceCell` type
-/// are upheld. Ideally we should not have implemented `Sync`
-/// for it, but we had to to make it usable in static variables
-unsafe impl<T> Sync for UnsafeOnceCell<T> where T: Sync {}
-
 fn clean_up_tracing() {
-    if let Some(trace_writer) =
-        // SAFETY: This is safe because this call to `get`
-        // is not concurrent with any call to `set`. `set` is
-        // called only once in the beginning in the driver entry
-        // function
-        unsafe { TRACE_WRITER.get() }
-    {
+    let ptr = TRACE_WRITER.swap(ptr::null_mut(), Ordering::Relaxed);
+    if !ptr.is_null() {
+        // SAFETY: The pointer was created from `Box::into_raw` and is
+        // only swapped out once here during driver unload.
+        let trace_writer = unsafe { Box::from_raw(ptr) };
         trace_writer.stop();
+        // `trace_writer` is dropped here, deallocating the Box
     }
 }
 
@@ -279,19 +193,8 @@ pub fn call_safe_driver_entry(
 
         trace_writer.start();
 
-        // SAFETY: We are upholding the invariants of `UnsafeOnceCell.set`
-        // because:
-        // 1. This is the only call to `TRACE_WRITER.set` and it runs only
-        // on one thread. Therefore, there is no question of `set` running
-        // concurrently with itself
-        // 2. This is the driver entry and it is guaranteed to run before
-        // any other driver code. Therefore `TRACE_WRITER.get` cannot run
-        // concurrently with `TRACE_WRITER.set`
-        unsafe {
-            TRACE_WRITER
-                .set(trace_writer)
-                .expect("trace writer should not be already set");
-        }
+        let ptr = Box::into_raw(Box::new(trace_writer));
+        TRACE_WRITER.store(ptr, Ordering::Relaxed);
     }
 
     match safe_entry(driver_object, registry_path) {
@@ -329,13 +232,8 @@ extern "C" fn wdm_driver_unload(_driver: *mut DRIVER_OBJECT) {
 }
 
 pub fn trace(message: &str) {
-    // SAFETY: This is safe because this call to `get`
-    // is not concurrent with any call to `set`. `set` is
-    // called only once in the beginning in the user's
-    // driver entry function
-    unsafe {
-        if let Some(trace_writer) = TRACE_WRITER.get() {
-            trace_writer.write(message);
-        }
-    }
+    let trace_writer = TRACE_WRITER.load(Ordering::Relaxed);
+    if !trace_writer.is_null() {
+        (unsafe { &*trace_writer }).write(message);
+    };
 }
