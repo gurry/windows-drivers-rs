@@ -15,6 +15,8 @@ use wdf::{
     DevicePowerPolicyIdleSettings,
     DevicePowerPolicyWakeSettings,
     Driver,
+    DriverConfig,
+    DriverObject,
     Guid,
     IoQueue,
     IoQueueConfig,
@@ -32,6 +34,7 @@ use wdf::{
     SentRequest,
     SpinLock,
     TriState,
+    UnicodeString,
     driver_entry,
     object_context,
     println,
@@ -129,22 +132,17 @@ struct UsbDeviceContext {
 ///
 /// # Arguments
 ///
-/// * `driver` - Represents the instance of the function driver that is loaded
-/// into memory. `driver` object is allocated by the system before the
-/// driver is loaded, and it is released by the system after the system unloads
-/// the function driver from memory.
+/// * `driver_object` - The WDM driver object provided by the system.
 ///
 /// * `registry_path` - Represents the driver specific path in the Registry.
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
-fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
+fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<Driver> {
     println!("OSRUSBFX2 Rust Driver Sample - Driver Framework Edition.\n");
 
-    // Set up the device add callback
-    driver.set_evt_device_add(evt_device_add);
-
-    Ok(())
+    let config = DriverConfig::new(evt_device_add);
+    Driver::create(driver_object, registry_path, config)
 }
 
 /// `evt_device_add` is called by the framework in response to AddDevice
