@@ -45,7 +45,7 @@ use super::{
     request::RequestType,
     resource::CmResList,
     result::{NtResult, NtStatusError, StatusCodeExt, status_codes, to_status_code},
-    string::{UnicodeString, WString},
+    string::{UnicodeStringBuf, WString},
 };
 
 impl_ref_counted_handle!(Device, DeviceContext);
@@ -95,7 +95,7 @@ impl Device {
     pub fn create_device_interface(
         &self,
         interaface_class_guid: &Guid,
-        reference_string: Option<&UnicodeString>,
+        reference_string: Option<&UnicodeStringBuf>,
     ) -> NtResult<()> {
         let reference_string_ptr =
             reference_string.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
@@ -199,7 +199,7 @@ impl Device {
     pub fn retrieve_device_interface_string(
         &self,
         interface_guid: &Guid,
-        reference_string: Option<&UnicodeString>,
+        reference_string: Option<&UnicodeStringBuf>,
     ) -> NtResult<WString> {
         let wdf_string = WString::create()?;
         let reference_string_ptr =

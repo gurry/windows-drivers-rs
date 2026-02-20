@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use wdf::{NtResult, NtStatusError, UnicodeString, WString, println, status_codes};
+use wdf::{NtResult, NtStatusError, UnicodeStringBuf, WString, println, status_codes};
 use wdk_sys::{
     DEVPROP_BOOLEAN,
     DEVPROP_TYPE_BOOLEAN,
@@ -127,7 +127,7 @@ pub const fn unrestricted_device_capabilities_prop_key() -> DEVPROPKEY {
 }
 
 fn get_interface_prop_data_routine() -> Option<IoSetDeviceInterfacePropertyData> {
-    let routine_name = UnicodeString::from_rust_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA);
+    let routine_name = UnicodeStringBuf::from_rust_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA);
     let routine_name_raw = routine_name.as_raw();
 
     let addr = unsafe {

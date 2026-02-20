@@ -51,7 +51,7 @@ impl WString {
         }
     }
 
-    pub fn get_unicode_string<'a>(&'a self) -> UnicodeStringRef<'a> {
+    pub fn get_unicode_string<'a>(&'a self) -> UnicodeString<'a> {
         let mut unicode_string = UNICODE_STRING::default();
 
         // SAFETY: The contract of the `Wstring` constructor
@@ -64,7 +64,7 @@ impl WString {
             )
         }
 
-        unsafe { UnicodeStringRef::from_raw(unicode_string) }
+        unsafe { UnicodeString::from_raw(unicode_string) }
     }
 
     pub fn to_rust_string_lossy(&self) -> String {
@@ -82,13 +82,14 @@ impl Drop for WString {
     }
 }
 
-/// A Rust representation of a UNICODE_STRING with an owned buffer.
-pub struct UnicodeString {
+/// A wrapper for `UNICODE_STRING` that owns
+/// the buffer that `UNICODE_STRING` points to.
+pub struct UnicodeStringBuf {
     _buf: Box<[u16]>, // `_buf` exists only to keep the buffer alive
     unicode_str: UNICODE_STRING,
 }
 
-impl UnicodeString {
+impl UnicodeStringBuf {
     pub fn from_rust_str(rust_str: &str) -> Self {
         let buf = Self::to_utf16_buf(rust_str);
         let unicode_str = Self::create_raw_unicode_string_from(&buf);
@@ -145,12 +146,18 @@ pub fn to_string_lossy(unicode_str: UNICODE_STRING) -> String {
     String::from_utf16_lossy(unicode_slice)
 }
 
-pub struct UnicodeStringRef<'a> {
+/// A wrapper for `UNICODE_STRING`
+/// `'a` represents the lifetime of the underlying buffer
+/// 
+/// This type has `repr(transparent)` to ensure `&UnicodeString`
+/// can be safely cast to `PUNICODE_STRING`
+#[repr(transparent)]
+pub struct UnicodeString<'a> {
     unicode_str: UNICODE_STRING,
     _marker: core::marker::PhantomData<&'a ()>, // Marker to tie the lifetime to the buffer
 }
 
-impl<'a> UnicodeStringRef<'a> {
+impl<'a> UnicodeString<'a> {
     pub(crate) unsafe fn from_raw(unicode_str: UNICODE_STRING) -> Self {
         Self {
             unicode_str,

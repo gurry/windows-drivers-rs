@@ -9,7 +9,7 @@ use wdk_sys::{
 use super::{
     object::Handle,
     result::{NtResult, StatusCodeExt},
-    string::UnicodeString,
+    string::UnicodeStringBuf,
 };
 
 /// Represents a framework registry key object corresponding to WDFKEY.
@@ -44,7 +44,7 @@ impl RegistryKey {
     }
 
     /// Queries a `u32` value from the registry key.
-    pub fn query_u32(&self, value_name: &UnicodeString) -> NtResult<u32> {
+    pub fn query_u32(&self, value_name: &UnicodeStringBuf) -> NtResult<u32> {
         let mut value: u32 = 0;
 
         unsafe {
