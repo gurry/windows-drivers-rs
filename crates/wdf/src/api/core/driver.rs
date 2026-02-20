@@ -11,6 +11,7 @@ pub use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDFOBJECT,
 };
+use wdf_macros::object_context;
 use wdk_sys::{
     WDF_DRIVER_CONFIG,
     WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
@@ -24,7 +25,7 @@ use super::{
     device::DeviceInit,
     guid::Guid,
     init_wdf_struct,
-    object::Handle,
+    object::{Handle, impl_handle},
     result::{NtResult, StatusCodeExt, status_codes},
     string::{UnicodeString, WString},
     tracing::TraceWriter,
@@ -32,7 +33,6 @@ use super::{
 use crate::println;
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
-static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> NtResult<()>> = UnsafeOnceCell::new();
 
 /// A safe wrapper around `DRIVER_OBJECT`
 #[repr(transparent)]
@@ -58,18 +58,23 @@ impl DriverConfig {
     }
 }
 
-/// Represents a driver
-pub struct Driver {
-    wdf_driver: WDFDRIVER,
+impl_handle!(
+    /// Represents a WDF driver object
+    Driver
+);
+
+#[object_context(Driver)]
+struct DriverContext {
+    evt_device_add: fn(&mut DeviceInit) -> NtResult<()>,
 }
 
 impl Driver {
     /// Creates a new driver object
-    pub fn create(
-        driver_object: &mut DriverObject,
+    pub fn create<'a>(
+        driver_object: &'a mut DriverObject,
         registry_path: &UnicodeString,
         config: DriverConfig,
-    ) -> NtResult<Self> {
+    ) -> NtResult<&'a Driver> {
         let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
         driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
         driver_config.DriverPoolTag = config.pool_tag;
@@ -91,18 +96,18 @@ impl Driver {
         }
         .ok()?;
 
-        // SAFETY: This is safe because `Driver::create` can be called only
-        // from driver entry (as that is the only place where the required argument
-        // `DriverObject` is available), so there are no concurrent writes
-        // to `EVT_DEVICE_ADD`. There are reads on it but they come only after
-        // driver entry and this function is finished.
-        unsafe {
-            EVT_DEVICE_ADD
-                .set(config.evt_device_add)
-                .expect("device add callback should not be already set");
-        }
+        // SAFETY: `Driver` is a ZST handle type (via `impl_handle!`), so
+        // casting the raw `WDFDRIVER` pointer to `&Driver` is sound.
+        let driver: &Driver = unsafe { &*(wdf_driver.cast()) };
 
-        Ok(Driver { wdf_driver })
+        DriverContext::attach(
+            driver,
+            DriverContext {
+                evt_device_add: config.evt_device_add,
+            },
+        )?;
+
+        Ok(driver)
     }
 
     pub fn retrieve_version_string(&self) -> NtResult<String> {
@@ -111,7 +116,7 @@ impl Driver {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDriverRetrieveVersionString,
-                self.wdf_driver,
+                self.as_ptr().cast(),
                 string.as_ptr().cast(),
             )
         };
@@ -131,7 +136,7 @@ impl Driver {
         let res = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDriverIsVersionAvailable,
-                self.wdf_driver,
+                self.as_ptr().cast(),
                 &raw mut params,
             )
         };
@@ -252,7 +257,7 @@ fn clean_up_tracing() {
 pub fn call_safe_driver_entry(
     driver_object: &mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
-    safe_entry: fn(&mut DriverObject, &UnicodeString) -> NtResult<Driver>,
+    safe_entry: fn(&mut DriverObject, &UnicodeString) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
 ) -> NTSTATUS {
     driver_object.DriverUnload = Some(wdm_driver_unload);
@@ -264,7 +269,6 @@ pub fn call_safe_driver_entry(
 
     // SAFETY: `UnicodeString` is `#[repr(transparent)]` over `UNICODE_STRING`,
     // so casting `PCUNICODE_STRING` to `&UnicodeString` preserves pointer identity.
-    // The pointer is valid for the duration of DriverEntry.
     let registry_path: &UnicodeString =
         unsafe { &*(reg_path.cast::<UnicodeString>()) };
 
@@ -291,7 +295,7 @@ pub fn call_safe_driver_entry(
     }
 
     match safe_entry(driver_object, registry_path) {
-        Ok(_driver) => 0,
+        Ok(()) => 0,
         Err(e) => {
             clean_up_tracing();
             e.code()
@@ -301,23 +305,18 @@ pub fn call_safe_driver_entry(
 
 #[unsafe(link_section = "PAGE")]
 extern "C" fn evt_driver_device_add(
-    _driver: WDFDRIVER,
+    driver: WDFDRIVER,
     device_init: *mut WDFDEVICE_INIT,
 ) -> NTSTATUS {
-    if let Some(cb) =
-        // SAFETY: This is safe because this call to `get`
-        // is not concurrent with any call to `set`. `set` is
-        // called only once in the beginning in the user's
-        // driver entry function
-        unsafe { EVT_DEVICE_ADD.get() }
-    {
-        let mut device_init = unsafe { DeviceInit::from(device_init) };
-        match cb(&mut device_init) {
-            Ok(_) => 0,
-            Err(e) => e.code(),
-        }
-    } else {
-        0
+    // SAFETY: `Driver` is a ZST handle type, so casting `WDFDRIVER` to
+    // `&Driver` is sound.
+    let driver: &Driver = unsafe { &*(driver.cast()) };
+    let ctxt = DriverContext::get(driver);
+
+    let mut device_init = unsafe { DeviceInit::from(device_init) };
+    match (ctxt.evt_device_add)(&mut device_init) {
+        Ok(_) => 0,
+        Err(e) => e.code(),
     }
 }
 

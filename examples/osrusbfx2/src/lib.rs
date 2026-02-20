@@ -138,11 +138,12 @@ struct UsbDeviceContext {
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
-fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<Driver> {
+fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<()> {
     println!("OSRUSBFX2 Rust Driver Sample - Driver Framework Edition.\n");
 
     let config = DriverConfig::new(evt_device_add);
-    Driver::create(driver_object, registry_path, config)
+    Driver::create(driver_object, registry_path, config)?;
+    Ok(())
 }
 
 /// `evt_device_add` is called by the framework in response to AddDevice
