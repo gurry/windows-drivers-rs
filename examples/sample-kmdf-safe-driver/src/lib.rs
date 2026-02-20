@@ -50,7 +50,7 @@ use alloc::{vec, vec::Vec};
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
-///---- These traits and functions are part of the wdf crate we supply ----
+///---- These traits and functions are part of the wdf crate/shim layer that we supply ----
 
 pub trait Driver {    
     fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
@@ -58,13 +58,19 @@ pub trait Driver {
     }
 }
 
-fn driver_init<T: Driver>(driver: T) -> NtResult<&T> {
+fn driver_register<T: Driver>(driver: T) -> NtResult<&mut T> {
     //...
+    // Similar to `device_register()` below 
 }
 
 
 pub trait Device {
     fn evt_device_self_managed_io_init(&self) -> NtResult<()> {
+        // These are empty default implementations of callbacks.
+        // (think of them as virtual methods in a base class)
+        // It gives the user flexibility to not implement
+        // some callbacks. For any ones the user doesnot implement
+        // these default implementations get called instead       
         Ok(()) 
     }
     fn evt_device_self_managed_io_suspend(&self) -> NtResult<()> {
@@ -77,10 +83,47 @@ pub trait Device {
     // Others callbacks ...
 }
 
-fn device_init<T: Device>(device: T, device_init: &DeviceInit) -> NtResult<&T> {
-    //...
+// Creates WDFDEVICE wires up its callbacks with
+fn device_register<'a, T: Device>(user_device: T, device_init: &DeviceInit) -> NtResult<&'a mut T> {
+    // Set up raw callbacks (e.g. _evt_self_managed_io_suspend declared below)
+    unsafe { WdfDeviceInitSetPnpPowerEventCallbacks, device_init.as_ptr_mut(), ...) };
+    let attributes = // Set up attributes with the required size of context
+       
+    // Create WDFDEVICE
+    let device = unsafe { WdfDeviceCreate(device_init.as_ptr(), attributes, ...) }; 
+    
+    
+    // Create a Rust object for hidden context and store `user_device` in it
+    let rust_ctxt  = HiddenDeviceCtxt { user_device };
+
+    // Get the raw context memory from WDFDEVICE
+    // and move the Rust context into it
+    let raw_ctxt = // Get raw context from WDFDEVICE
+    // Using `core::ptr::write` stops the compiler
+    // from calling `drop()` on `rust_ctxt`
+    unsafe { core::ptr::write(raw_ctxt, rust_ctxt) };
+
+    // Return a mutable ref to `user_device` for the
+    // user to use further
+    Ok(&mut user_device)
 }
 
+struct HiddenDeviceCtxt<T: Device> {
+    user_device: T
+}
+
+// Raw callback which the framework calls. It finds 
+// the user's device object and forwards the call to
+// the corresponding callback trait method
+unsafe extern "C" fn _evt_self_managed_io_suspend(device: WDFDEVICE, ...) {
+    let ctxt = // get context from WDFDEVICE in which we stored user's device 
+    let user_device = ctxt.device; // Get user's device from context
+    
+    // Convert arguments from raw to safe objects here.
+
+    // Call the user's callback method
+    user_device.self_managed_io_suspend(... safe arguments ...);
+}
 
 pub trait IoQueue {
     fn evt_io_read(&self, request: Request, length: usize) {
@@ -93,8 +136,9 @@ pub trait IoQueue {
     // Others callbacks ...
 }
 
-fn queue_init<T: IoQueue>(queue: T, device: &Device, config: &IoQueueConfig) -> NtResult<Arc<T>> {
+fn queue_register<T: IoQueue>(queue: T, device: &Device, config: &IoQueueConfig) -> NtResult<Arc<T>> {
     //...
+    // Similar to `device_register()` above
 }
 
 
@@ -104,8 +148,9 @@ pub trait Timer {
     }
 }
 
-fn timer_init<T: Timer>(timer: T, config: &TimerConfig) -> NtResult<Arc<T>> {
+fn timer_register<T: Timer>(timer: T, config: &TimerConfig) -> NtResult<Arc<T>> {
     //...
+    // Similar to `device_register()` above
 }
 
 
@@ -133,17 +178,14 @@ fn timer_init<T: Timer>(timer: T, config: &TimerConfig) -> NtResult<Arc<T>> {
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
-    if cfg!(debug_assertions) {
-        print_driver_version(driver)?;
-    }
-
-    let _ = driver_init(MyDriver {})?;
+    let my_driver = MyDriver {};
+    let _ = driver_register(my_driver)?;
     
     trace("Trace: Safe Rust driver entry complete");
 
     Ok(())
 }
-
+                
 struct MyDriver;
 
 /// Driver impl for WDF callbacks
@@ -157,7 +199,7 @@ impl Driver for MyDriver {
     /// * `device_init` - Reference to a framework-allocated `DeviceInit` structure.
     fn evt_device_add(&self, device_init: &mut DeviceInit) -> NtResult<()> {
         println!("Enter evt_device_add");
-        self.device_init(device_init)
+        Self::set_up_device(device_init)
     }
 }
 
@@ -172,8 +214,9 @@ impl MyDriver {
     /// this structure will be freed by the framework when the
     /// WdfDeviceCreate succeeds. So don't access the structure after
     /// that point.
-    fn device_init(device_init: &mut DeviceInit) -> NtResult<()> {     
-        let device = device_init(MyDevice {}, device_init)?
+    fn set_up_device(device_init: &mut DeviceInit) -> NtResult<()> { 
+        let my_device = MyDevice { default_queue: None };
+        let my_device = device_init(my_device, device_init)?
        
         // Create a device interface so that applications can find us and talk
         // to us.
@@ -182,7 +225,7 @@ impl MyDriver {
             None,
         )?;
 
-        self.queue_init(&device)
+        Self::set_up_queue(&my_device)
     }
 
     /// The I/O dispatch callbacks for the frameworks device object
@@ -195,11 +238,11 @@ impl MyDriver {
     /// # Arguments
     ///
     /// * `device`` - Handle to a framework device object.
-    fn queue_init(device: &Device) -> NtResult<()> {
+    fn set_up_queue(device: &MyDevice) -> NtResult<()> {
         // Create timer
         let timer_config = TimerConfig::new_periodic(&queue, 9_000, 0, false);
 
-        let timer = timer_init(MyTimer {
+        let timer = timer_register(MyTimer {
             queue: None,
         });
 
@@ -207,18 +250,23 @@ impl MyDriver {
         let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
         queue_config.default_queue = true; 
 
-        let queue = queue_init(MyQueue {
+        let queue = queue_register(MyQueue {
             request: SpinLock::create(None)?,
             buffer: SpinLock::create(None)?,
             timer,
         }, &device, &queue_config)?;
 
-        timer.queue = Some(queue);
+        timer.queue = Some(queue.clone());
+
+        device.default_queue = Some(queue.clone());
+        
         Ok(())
     }
 }
 
-struct MyDevice;
+struct MyDevice {
+    default_queue: Option<Arc<IoQueue>>
+}
 
 impl Device for MyDevice {
     /// This callback is called by the Framework when the device is started
@@ -230,7 +278,7 @@ impl Device for MyDevice {
         println!("Self-managed I/O start called: {:?}", device);
 
         let queue = self
-            .get_default_queue()
+            .default_queue
             .expect("Failed to get default queue");
 
         queue.start();
@@ -251,7 +299,7 @@ impl Device for MyDevice {
         println!("Self-managed I/O suspend called: {:?}", self);
 
         let queue = self
-            .get_default_queue()
+            .default_queue
             .expect("Failed to get default queue");
 
         queue.stop_synchronously();
@@ -298,7 +346,7 @@ impl IoQueue for MyQueue {
     ///   is to not dispatch zero length read & write requests to the driver and
     ///   complete is with status success. So we will never get a zero length
     ///   request.
-    fn evt_io_read(&&self, mut request: Request, length: usize) {
+    fn evt_io_read(&self, mut request: Request, length: usize) {
         println!("evt_io_read called. Queue {self:?}, Request {request:?} Length {length}");
 
         let memory = match request.retrieve_output_memory() {
@@ -421,8 +469,6 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
     }
 }
 
-/// Context object to be attached to a timer
-#[object_context(Timer)]
 struct MyTimer {
     queue: Option<Arc<IoQueue>>,
 }
@@ -436,17 +482,12 @@ impl Timer for MyTimer {
     /// # Arguments
     ///
     /// * `timer` - Handle of the timer that fired
-    fn evt_timer(timer: &Opaque<Timer>) {
+    fn evt_timer(&self) {
         println!("evt_timer called");
 
-        let Some(timer) = timer.upgrade() else {
-            println!("Timer cannot be upgraded to Arc");
-            return;
-        };
+        let queue = self.queue.expect("queue must be set");
 
-        let queue = &TimerContext::get(&timer).queue.expect("queue must be set");;
-
-        let req = QueueContext::get(queue).request.lock().take();
+        let req = queue.request.lock().take();
 
         if let Some(req) = req {
             req.complete(status_codes::STATUS_SUCCESS.into());
@@ -455,24 +496,4 @@ impl Timer for MyTimer {
             println!("No request pending");
         }
     }
-}
-
-/// This routine shows how to retrieve framework version string and
-/// also how to find out to which version of framework library the
-/// client driver is bound to.
-///
-/// # Arguments
-///
-/// * `driver` - The driver handle
-fn print_driver_version(driver: &Driver) -> NtResult<()> {
-    let driver_version = driver.retrieve_version_string()?;
-    println!("Echo Sample {driver_version}");
-
-    if driver.is_version_available(1, 0) {
-        println!("Yes, framework version is 1.0");
-    } else {
-        println!("No, framework version is not 1.0");
-    }
-
-    Ok(())
 }
