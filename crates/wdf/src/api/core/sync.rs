@@ -612,3 +612,233 @@ impl<T: Clone> Slot<T> {
         self.val.lock().is_none()
     }
 }
+
+/// Thread-safe version of `RefCell`
+///
+/// Behaves like a reader-writer lock except it never
+/// blocks any thread. If a borrow cannot be obtained,
+/// `None` is returned instead.
+///
+/// Uses an `AtomicIsize` borrow counter:
+/// - `0` means unborrowed
+/// - `> 0` means shared (number of active readers)
+/// - `-1` means exclusively borrowed (writer active)
+///
+/// All operations are lock-free and work at any IRQL.
+pub struct AtomicRefCell<T> {
+    borrow_state: AtomicIsize,
+    data: UnsafeCell<T>,
+}
+
+/// `AtomicRefCell` requires `T` to be `Send` because
+/// non-`Send` types can lead to situations where a thread
+/// NOT holding the borrow can also access the data. An
+/// example of this is `Rc` wherein the borrow will protect
+/// only one clone of `Rc` and another thread can still
+/// access the data through another clone without borrowing.
+///
+/// `AtomicRefCell` also requires `T` to be `Sync` because
+/// `borrow()` hands out shared references `&T` to multiple
+/// threads concurrently, which is only valid if `T` supports
+/// shared references across threads.
+unsafe impl<T> Sync for AtomicRefCell<T> where T: Send + Sync {}
+
+/// `AtomicRefCell<T>` is `Send` if `T` is `Send` because
+/// moving the cell to another thread moves the owned `T`.
+unsafe impl<T> Send for AtomicRefCell<T> where T: Send {}
+
+impl<T> AtomicRefCell<T> {
+    /// Creates a new `AtomicRefCell` with the given value
+    pub const fn new(data: T) -> Self {
+        Self {
+            borrow_state: AtomicIsize::new(0),
+            data: UnsafeCell::new(data),
+        }
+    }
+
+    /// Attempts to immutably borrow the value.
+    ///
+    /// Returns `Some(AtomicRef)` if no exclusive borrow
+    /// is active, or `None` if the value is currently
+    /// exclusively borrowed.
+    ///
+    /// Multiple shared borrows can be held simultaneously.
+    pub fn borrow(&self) -> Option<AtomicRef<'_, T>> {
+        // `Relaxed` is sufficient for the initial load because this
+        // is just a hint for the CAS loop. If the value is stale,
+        // compare_exchange_weak will fail and give us the fresh
+        // value — no synchronization is needed here.
+        let mut cur = self.borrow_state.load(Ordering::Relaxed);
+
+        loop {
+            // Exclusively borrowed — cannot obtain shared borrow
+            if cur < 0 {
+                return None;
+            }
+
+            // `Acquire` on success pairs with `Release` in both
+            // AtomicRef::drop and AtomicRefMut::drop. This
+            // ensures we see all writes a previous writer
+            // performed before releasing its exclusive borrow.
+            //
+            // `Relaxed` on failure because we do not access the
+            // data on the failure path. The returned error
+            // value is used as the next expected value.
+            //
+            // compare_exchange_weak (rather than strong) is used
+            // because we are already in a retry loop. Weak is
+            // allowed to spuriously fail, which lets the compiler
+            // emit more efficient LL/SC instructions on
+            // architectures that do not have true hardware CAS.
+            match self.borrow_state.compare_exchange_weak(
+                cur,
+                cur + 1,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(AtomicRef { cell: self }),
+                Err(next) => cur = next,
+            }
+        }
+    }
+
+    /// Attempts to mutably borrow the value.
+    ///
+    /// Returns `Some(AtomicRefMut)` if there are no active
+    /// borrows (shared or exclusive), or `None` otherwise.
+    ///
+    /// Only one exclusive borrow can be held at a time,
+    /// and it cannot coexist with shared borrows.
+    pub fn borrow_mut(&self) -> Option<AtomicRefMut<'_, T>> {
+        // `Acquire` on success pairs with `Release` in both
+        // AtomicRef::drop (readers releasing) and
+        // AtomicRefMut::drop (previous writer releasing).
+        // This ensures we see all data modifications made
+        // by any prior borrow holder before we access the
+        // UnsafeCell.
+        //
+        // `Relaxed` on failure because we return None
+        // immediately — no data is accessed.
+        //
+        // Strong compare_exchange (not weak) is used because
+        // there is no retry loop. A spurious failure would
+        // incorrectly return None to the caller when the
+        // borrow was actually available.
+        if self
+            .borrow_state
+            .compare_exchange(0, -1, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Some(AtomicRefMut { cell: self })
+        } else {
+            None
+        }
+    }
+
+    /// Bugchecks with the address of this cell and the
+    /// invalid borrow state value for debugging.
+    fn bug_check_invalid_state(&self, state: isize) -> ! {
+        bug_check(
+            0xDEADDEAD,
+            (self as *const Self).cast_mut().cast::<_>(),
+            Some(state as usize),
+        );
+        // bug_check calls KeBugCheckEx which never returns,
+        // but the compiler doesn't know that.
+        unreachable!()
+    }
+}
+
+/// RAII guard for a shared borrow from [`AtomicRefCell`].
+///
+/// The shared borrow is held for the lifetime of this guard
+/// and released when it is dropped.
+pub struct AtomicRef<'a, T> {
+    cell: &'a AtomicRefCell<T>,
+}
+
+impl<T> Drop for AtomicRef<'_, T> {
+    fn drop(&mut self) {
+        // `Release` pairs with `Acquire` in borrow() and
+        // borrow_mut(). This ensures that all reads
+        // performed through this guard are completed
+        // before the borrow count decreases.
+        //
+        // Every reader needs `Release` (not just the last
+        // one going from 1 → 0) because unlike Arc::drop
+        // where 1 → 0 means the object is being destroyed
+        // and no further access will occur, here a writer
+        // could be accessing T next and we don't want any
+        // of the readers' accesses to be reordered such
+        // that they occur concucurrently with the writer's
+        // writes.
+        let prev = self.cell.borrow_state.fetch_sub(1, Ordering::Release);
+
+        // prev must be > 0 (at least one active reader).
+        // A value <= 0 means the borrow state is corrupted.
+        if prev <= 0 {
+            self.cell.bug_check_invalid_state(prev);
+        }
+    }
+}
+
+impl<T> Deref for AtomicRef<'_, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: The borrow state guarantees that no exclusive
+        // borrow is active while this guard exists, so reading
+        // from the UnsafeCell is safe.
+        unsafe { &*self.cell.data.get() }
+    }
+}
+
+/// RAII guard for an exclusive borrow from [`AtomicRefCell`].
+///
+/// The exclusive borrow is held for the lifetime of this guard
+/// and released when it is dropped.
+pub struct AtomicRefMut<'a, T> {
+    cell: &'a AtomicRefCell<T>,
+}
+
+impl<T> Drop for AtomicRefMut<'_, T> {
+    fn drop(&mut self) {
+        // `Release` pairs with `Acquire` in borrow() and
+        // borrow_mut(). This ensures that all writes
+        // performed through this guard via DerefMut are
+        // visible to the next thread that successfully
+        // acquires a borrow.
+        //
+        // A swap (not CAS) is used because we hold
+        // the exclusive borrow — the state must be -1 and
+        // no other thread can change it.
+        let prev = self.cell.borrow_state.swap(0, Ordering::Release);
+
+        // prev must be -1 (exclusively borrowed).
+        // Any other value means the borrow state is corrupted.
+        if prev != -1 {
+            self.cell.bug_check_invalid_state(prev);
+        }
+    }
+}
+
+impl<T> Deref for AtomicRefMut<'_, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: The borrow state guarantees exclusive access
+        // while this guard exists.
+        unsafe { &*self.cell.data.get() }
+    }
+}
+
+impl<T> DerefMut for AtomicRefMut<'_, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: The borrow state guarantees exclusive access
+        // while this guard exists.
+        unsafe { &mut *self.cell.data.get() }
+    }
+}
