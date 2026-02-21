@@ -297,7 +297,7 @@ pub(crate) fn bug_check_if_ref_count_not_zero<H: RefCountedHandle, C: ObjectCont
     }
 }
 
-pub(crate) fn bug_check(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) {
+pub(crate) fn bug_check(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) -> ! {
     let ref_count = ref_count.unwrap_or(0);
     unsafe {
         KeBugCheckEx(code, obj as u64, ref_count as u64, 0, 0);

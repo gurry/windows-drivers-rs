@@ -742,10 +742,7 @@ impl<T> AtomicRefCell<T> {
             0xDEADDEAD,
             (self as *const Self).cast_mut().cast::<_>(),
             Some(state as usize),
-        );
-        // bug_check calls KeBugCheckEx which never returns,
-        // but the compiler doesn't know that.
-        unreachable!()
+        )
     }
 }
 
