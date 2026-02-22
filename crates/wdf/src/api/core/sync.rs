@@ -746,6 +746,47 @@ impl<T> AtomicRefCell<T> {
     }
 }
 
+impl<T> AtomicRefCell<Option<T>> {
+    /// Attempts to immutably borrow the inner `T`.
+    ///
+    /// Returns `Some(InnerBorrow)` if the `Option` contains
+    /// a value **and** no exclusive borrow is active. The
+    /// returned guard dereferences directly to `&T`.
+    ///
+    /// Returns `None` if:
+    /// - The `Option` is `None`, or
+    /// - An exclusive borrow is currently held.
+    pub fn borrow_inner(&self) -> Option<InnerBorrow<'_, T>> {
+        let guard = self.borrow()?;
+
+        if guard.is_none() {
+            return None;
+        }
+
+        Some(InnerBorrow { inner: guard })
+    }
+
+    /// Attempts to exclusively borrow the inner `T`.
+    ///
+    /// Returns `Some(InnerBorrowMut)` if the `Option` contains
+    /// a value **and** no other borrow (shared or exclusive) is
+    /// active. The returned guard dereferences directly to
+    /// `&mut T`.
+    ///
+    /// Returns `None` if:
+    /// - The `Option` is `None`, or
+    /// - Any borrow is currently held.
+    pub fn borrow_inner_mut(&self) -> Option<InnerBorrowMut<'_, T>> {
+        let guard = self.borrow_mut()?;
+
+        if guard.is_none() {
+            return None;
+        }
+
+        Some(InnerBorrowMut { inner: guard })
+    }
+}
+
 /// RAII guard for a shared borrow from [`AtomicRefCell`].
 ///
 /// The shared borrow is held for the lifetime of this guard
@@ -807,9 +848,9 @@ impl<T> Drop for BorrowMut<'_, T> {
         // visible to the next thread that successfully
         // acquires a borrow.
         //
-        // A swap (not CAS) is used because we hold
-        // the exclusive borrow — the state must be -1 and
-        // no other thread can change it.
+        // A swap (not a CAS loop) is used because we hold
+        // the exclusive borrow — the state is guaranteed to
+        // be -1 and no other thread can change it
         let prev = self.cell.borrow_state.swap(0, Ordering::Release);
 
         // prev must be -1 (exclusively borrowed).
@@ -837,5 +878,55 @@ impl<T> DerefMut for BorrowMut<'_, T> {
         // SAFETY: The borrow state guarantees exclusive access
         // while this guard exists.
         unsafe { &mut *self.cell.data.get() }
+    }
+}
+
+/// RAII guard for a shared borrow of the inner value
+/// from an `AtomicRefCell<Option<T>>`.
+///
+/// Dereferences to `&T`
+pub struct InnerBorrow<'a, T> {
+    inner: Borrow<'a, Option<T>>,
+}
+
+impl<T> Deref for InnerBorrow<'_, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: `InnerBorrow` is only created inside
+        // `borrow_inner` after confirming that the `Option`
+        // is `Some`. The `Option` cannot be changed back to 
+        // `None` while `inner` borrow is alive. Therefore it is 
+        // safe to use `unwrap_unchecked`
+        unsafe { self.inner.as_ref().unwrap_unchecked() }
+    }
+}
+
+/// RAII guard for an exclusive borrow of the inner value
+/// from an `AtomicRefCell<Option<T>>`.
+///
+/// Dereferences to `&T` and `&mut T`
+pub struct InnerBorrowMut<'a, T> {
+    inner: BorrowMut<'a, Option<T>>,
+}
+
+impl<T> Deref for InnerBorrowMut<'_, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: `unwrap_unchecked` is safe to use due to
+        // the same reasoning as `InnerBorrow::deref`.
+        unsafe { self.inner.as_ref().unwrap_unchecked() }
+    }
+}
+
+impl<T> DerefMut for InnerBorrowMut<'_, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: `unwrap_unchecked` is safe to use due to
+        // the same reasoning as `InnerBorrow::deref`.
+        unsafe { self.inner.as_mut().unwrap_unchecked() }
     }
 }
