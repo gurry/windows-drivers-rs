@@ -663,7 +663,7 @@ impl<T> AtomicRefCell<T> {
     /// exclusively borrowed.
     ///
     /// Multiple shared borrows can be held simultaneously.
-    pub fn borrow(&self) -> Option<AtomicRef<'_, T>> {
+    pub fn borrow(&self) -> Option<Borrow<'_, T>> {
         // `Relaxed` is sufficient for the initial load because this
         // is just a hint for the CAS loop. If the value is stale,
         // compare_exchange_weak will fail and give us the fresh
@@ -709,7 +709,7 @@ impl<T> AtomicRefCell<T> {
     ///
     /// Only one exclusive borrow can be held at a time,
     /// and it cannot coexist with shared borrows.
-    pub fn borrow_mut(&self) -> Option<AtomicRefMut<'_, T>> {
+    pub fn borrow_mut(&self) -> Option<BorrowMut<'_, T>> {
         // `Acquire` on success pairs with `Release` in both
         // AtomicRef::drop (readers releasing) and
         // AtomicRefMut::drop (previous writer releasing).
@@ -750,11 +750,11 @@ impl<T> AtomicRefCell<T> {
 ///
 /// The shared borrow is held for the lifetime of this guard
 /// and released when it is dropped.
-pub struct AtomicRef<'a, T> {
+pub struct Borrow<'a, T> {
     cell: &'a AtomicRefCell<T>,
 }
 
-impl<T> Drop for AtomicRef<'_, T> {
+impl<T> Drop for Borrow<'_, T> {
     fn drop(&mut self) {
         // `Release` pairs with `Acquire` in borrow() and
         // borrow_mut(). This ensures that all reads
@@ -779,7 +779,7 @@ impl<T> Drop for AtomicRef<'_, T> {
     }
 }
 
-impl<T> Deref for AtomicRef<'_, T> {
+impl<T> Deref for Borrow<'_, T> {
     type Target = T;
 
     #[inline(always)]
@@ -795,11 +795,11 @@ impl<T> Deref for AtomicRef<'_, T> {
 ///
 /// The exclusive borrow is held for the lifetime of this guard
 /// and released when it is dropped.
-pub struct AtomicRefMut<'a, T> {
+pub struct BorrowMut<'a, T> {
     cell: &'a AtomicRefCell<T>,
 }
 
-impl<T> Drop for AtomicRefMut<'_, T> {
+impl<T> Drop for BorrowMut<'_, T> {
     fn drop(&mut self) {
         // `Release` pairs with `Acquire` in borrow() and
         // borrow_mut(). This ensures that all writes
@@ -820,7 +820,7 @@ impl<T> Drop for AtomicRefMut<'_, T> {
     }
 }
 
-impl<T> Deref for AtomicRefMut<'_, T> {
+impl<T> Deref for BorrowMut<'_, T> {
     type Target = T;
 
     #[inline(always)]
@@ -831,7 +831,7 @@ impl<T> Deref for AtomicRefMut<'_, T> {
     }
 }
 
-impl<T> DerefMut for AtomicRefMut<'_, T> {
+impl<T> DerefMut for BorrowMut<'_, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: The borrow state guarantees exclusive access
