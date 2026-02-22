@@ -663,7 +663,7 @@ impl<T> AtomicRefCell<T> {
     /// exclusively borrowed.
     ///
     /// Multiple shared borrows can be held simultaneously.
-    pub fn borrow(&self) -> Option<Borrow<'_, T>> {
+    pub fn borrow(&self) -> Option<AtomicRef<'_, T>> {
         // `Relaxed` is sufficient for the initial load because this
         // is just a hint for the CAS loop. If the value is stale,
         // compare_exchange_weak will fail and give us the fresh
@@ -709,7 +709,7 @@ impl<T> AtomicRefCell<T> {
     ///
     /// Only one exclusive borrow can be held at a time,
     /// and it cannot coexist with shared borrows.
-    pub fn borrow_mut(&self) -> Option<BorrowMut<'_, T>> {
+    pub fn borrow_mut(&self) -> Option<AtomicRefMut<'_, T>> {
         // `Acquire` on success pairs with `Release` in both
         // AtomicRef::drop (readers releasing) and
         // AtomicRefMut::drop (previous writer releasing).
@@ -749,26 +749,26 @@ impl<T> AtomicRefCell<T> {
 impl<T> AtomicRefCell<Option<T>> {
     /// Attempts to immutably borrow the inner `T`.
     ///
-    /// Returns `Some(InnerBorrow)` if the `Option` contains
+    /// Returns `Some(InnerAtomicRef)` if the `Option` contains
     /// a value **and** no exclusive borrow is active. The
     /// returned guard dereferences directly to `&T`.
     ///
     /// Returns `None` if:
     /// - The `Option` is `None`, or
     /// - An exclusive borrow is currently held.
-    pub fn borrow_inner(&self) -> Option<InnerBorrow<'_, T>> {
+    pub fn borrow_inner(&self) -> Option<InnerAtomicRef<'_, T>> {
         let guard = self.borrow()?;
 
         if guard.is_none() {
             return None;
         }
 
-        Some(InnerBorrow { inner: guard })
+        Some(InnerAtomicRef { inner: guard })
     }
 
     /// Attempts to exclusively borrow the inner `T`.
     ///
-    /// Returns `Some(InnerBorrowMut)` if the `Option` contains
+    /// Returns `Some(InnerAtomicRefMut)` if the `Option` contains
     /// a value **and** no other borrow (shared or exclusive) is
     /// active. The returned guard dereferences directly to
     /// `&mut T`.
@@ -776,14 +776,14 @@ impl<T> AtomicRefCell<Option<T>> {
     /// Returns `None` if:
     /// - The `Option` is `None`, or
     /// - Any borrow is currently held.
-    pub fn borrow_inner_mut(&self) -> Option<InnerBorrowMut<'_, T>> {
+    pub fn borrow_inner_mut(&self) -> Option<InnerAtomicRefMut<'_, T>> {
         let guard = self.borrow_mut()?;
 
         if guard.is_none() {
             return None;
         }
 
-        Some(InnerBorrowMut { inner: guard })
+        Some(InnerAtomicRefMut { inner: guard })
     }
 }
 
@@ -791,11 +791,11 @@ impl<T> AtomicRefCell<Option<T>> {
 ///
 /// The shared borrow is held for the lifetime of this guard
 /// and released when it is dropped.
-pub struct Borrow<'a, T> {
+pub struct AtomicRef<'a, T> {
     cell: &'a AtomicRefCell<T>,
 }
 
-impl<T> Drop for Borrow<'_, T> {
+impl<T> Drop for AtomicRef<'_, T> {
     fn drop(&mut self) {
         // `Release` pairs with `Acquire` in borrow() and
         // borrow_mut(). This ensures that all reads
@@ -808,7 +808,7 @@ impl<T> Drop for Borrow<'_, T> {
         // and no further access will occur, here a writer
         // could be accessing T next and we don't want any
         // of the readers' accesses to be reordered such
-        // that they occur concucurrently with the writer's
+        // that they occur concurrently with the writer's
         // writes.
         let prev = self.cell.borrow_state.fetch_sub(1, Ordering::Release);
 
@@ -820,7 +820,7 @@ impl<T> Drop for Borrow<'_, T> {
     }
 }
 
-impl<T> Deref for Borrow<'_, T> {
+impl<T> Deref for AtomicRef<'_, T> {
     type Target = T;
 
     #[inline(always)]
@@ -836,11 +836,11 @@ impl<T> Deref for Borrow<'_, T> {
 ///
 /// The exclusive borrow is held for the lifetime of this guard
 /// and released when it is dropped.
-pub struct BorrowMut<'a, T> {
+pub struct AtomicRefMut<'a, T> {
     cell: &'a AtomicRefCell<T>,
 }
 
-impl<T> Drop for BorrowMut<'_, T> {
+impl<T> Drop for AtomicRefMut<'_, T> {
     fn drop(&mut self) {
         // `Release` pairs with `Acquire` in borrow() and
         // borrow_mut(). This ensures that all writes
@@ -861,7 +861,7 @@ impl<T> Drop for BorrowMut<'_, T> {
     }
 }
 
-impl<T> Deref for BorrowMut<'_, T> {
+impl<T> Deref for AtomicRefMut<'_, T> {
     type Target = T;
 
     #[inline(always)]
@@ -872,7 +872,7 @@ impl<T> Deref for BorrowMut<'_, T> {
     }
 }
 
-impl<T> DerefMut for BorrowMut<'_, T> {
+impl<T> DerefMut for AtomicRefMut<'_, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: The borrow state guarantees exclusive access
@@ -885,16 +885,16 @@ impl<T> DerefMut for BorrowMut<'_, T> {
 /// from an `AtomicRefCell<Option<T>>`.
 ///
 /// Dereferences to `&T`
-pub struct InnerBorrow<'a, T> {
-    inner: Borrow<'a, Option<T>>,
+pub struct InnerAtomicRef<'a, T> {
+    inner: AtomicRef<'a, Option<T>>,
 }
 
-impl<T> Deref for InnerBorrow<'_, T> {
+impl<T> Deref for InnerAtomicRef<'_, T> {
     type Target = T;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        // SAFETY: `InnerBorrow` is only created inside
+        // SAFETY: `InnerAtomicRef` is only created inside
         // `borrow_inner` after confirming that the `Option`
         // is `Some`. The `Option` cannot be changed back to 
         // `None` while `inner` borrow is alive. Therefore it is 
@@ -907,26 +907,26 @@ impl<T> Deref for InnerBorrow<'_, T> {
 /// from an `AtomicRefCell<Option<T>>`.
 ///
 /// Dereferences to `&T` and `&mut T`
-pub struct InnerBorrowMut<'a, T> {
-    inner: BorrowMut<'a, Option<T>>,
+pub struct InnerAtomicRefMut<'a, T> {
+    inner: AtomicRefMut<'a, Option<T>>,
 }
 
-impl<T> Deref for InnerBorrowMut<'_, T> {
+impl<T> Deref for InnerAtomicRefMut<'_, T> {
     type Target = T;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         // SAFETY: `unwrap_unchecked` is safe to use due to
-        // the same reasoning as `InnerBorrow::deref`.
+        // the same reasoning as `InnerAtomicRef::deref`.
         unsafe { self.inner.as_ref().unwrap_unchecked() }
     }
 }
 
-impl<T> DerefMut for InnerBorrowMut<'_, T> {
+impl<T> DerefMut for InnerAtomicRefMut<'_, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: `unwrap_unchecked` is safe to use due to
-        // the same reasoning as `InnerBorrow::deref`.
+        // the same reasoning as `InnerAtomicRef::deref`.
         unsafe { self.inner.as_mut().unwrap_unchecked() }
     }
 }
