@@ -29,8 +29,8 @@ impl Guid {
     /// Parses a GUID from a string of 32 hex digits. Dashes are allowed
     /// anywhere in the string and are ignored.
     ///
-    /// This is a `const fn`, so it can be used in const contexts (e.g.
-    /// `const` items and `static` initializers).
+    /// Hex digits are parsed in a single pass, writing directly into the
+    /// GUID fields (`Data1`, `Data2`, `Data3`, `Data4`) one nibble at a time.
     ///
     /// # Examples
     ///
@@ -43,15 +43,63 @@ impl Guid {
     /// ));
     /// ```
     pub const fn parse(guid_str: &str) -> Result<Self, &'static str> {
-        let hex_digits = match Self::extract_hex_digits(guid_str.as_bytes()) {
-            Ok(buf) => buf,
-            Err(e) => return Err(e),
-        };
+        const ERR: &str = "Invalid GUID format: expected 32 hex digits, with optional dashes";
 
-        let data1 = Self::parse_hex_u32(&hex_digits, 0, 8);
-        let data2 = Self::parse_hex_u32(&hex_digits, 8, 4) as u16;
-        let data3 = Self::parse_hex_u32(&hex_digits, 12, 4) as u16;
-        let data4 = Self::parse_hex_u8_array(&hex_digits, 16);
+        let bytes = guid_str.as_bytes();
+
+        // GUID fields we build up incrementally as we scan hex digits.
+        let mut data1: u32 = 0;
+        let mut data2: u16 = 0;
+        let mut data3: u16 = 0;
+        let mut data4 = [0u8; 8];
+
+        // `count` tracks how many hex digits we've consumed so far (excluding
+        // dashes). It determines which GUID field the current digit belongs to:
+        //   digits  0.. 7 → Data1 (u32, 8 hex digits)
+        //   digits  8..11 → Data2 (u16, 4 hex digits)
+        //   digits 12..15 → Data3 (u16, 4 hex digits)
+        //   digits 16..31 → Data4 ([u8; 8], 16 hex digits, 2 per byte)
+        let mut count: usize = 0;
+        let mut i = 0;
+
+        while i < bytes.len() {
+            let b = bytes[i];
+            match b {
+                // Dashes are simply skipped
+                b'-' => {}
+                b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {
+                    // More than 32 hex digits is invalid
+                    if count >= 32 {
+                        return Err(ERR);
+                    }
+                    let val = Self::hex_digit_to_value(b);
+
+                    // Shift the target field left by 4 bits and OR in the new
+                    // nibble. For Data4 bytes, `(count - 16) / 2` gives the
+                    // byte index; each byte accumulates two nibbles the same
+                    // way (high nibble first, then low).
+                    if count < 8 {
+                        data1 = (data1 << 4) | val as u32;
+                    } else if count < 12 {
+                        data2 = (data2 << 4) | val as u16;
+                    } else if count < 16 {
+                        data3 = (data3 << 4) | val as u16;
+                    } else {
+                        let byte_idx = (count - 16) / 2;
+                        data4[byte_idx] = (data4[byte_idx] << 4) | val;
+                    }
+                    count += 1;
+                }
+                // Any character that isn't a hex digit or dash is invalid.
+                _ => return Err(ERR),
+            }
+            i += 1;
+        }
+
+        // Make sure we have seen exactly 32 hex digits.
+        if count != 32 {
+            return Err(ERR);
+        }
 
         Ok(Guid(GUID {
             Data1: data1,
@@ -61,70 +109,13 @@ impl Guid {
         }))
     }
 
-    /// Extracts hex digits from `bytes`, skipping any dashes.
-    /// Returns them collected into a fixed-size buffer.
-    const fn extract_hex_digits(bytes: &[u8]) -> Result<[u8; 32], &'static str> {
-        const BUF_SIZE: usize = 32;
-        const ERR: &str = "Invalid GUID format: expected 32 hex digits, with optional dashes";
-
-        let mut hex_digits = [0u8; BUF_SIZE];
-        let mut filled = 0;
-        let mut i = 0;
-
-        while i < bytes.len() {
-            let b = bytes[i];
-            match b {
-                b'-' => {}
-                b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {
-                    if filled >= BUF_SIZE {
-                        return Err(ERR);
-                    }
-                    hex_digits[filled] = b;
-                    filled += 1;
-                }
-                _ => return Err(ERR),
-            }
-            i += 1;
-        }
-
-        if filled != BUF_SIZE {
-            return Err(ERR);
-        }
-
-        Ok(hex_digits)
-    }
-
-    /// Parses `count` hex digits starting at `offset` into a `u32`.
-    const fn parse_hex_u32(digits: &[u8; 32], offset: usize, count: usize) -> u32 {
-        let mut value: u32 = 0;
-        let mut i = 0;
-        while i < count {
-            value = (value << 4) | Self::hex_digit_to_value(digits[offset + i]) as u32;
-            i += 1;
-        }
-        value
-    }
-
-    /// Parses 8 consecutive byte pairs starting at `offset` into a `[u8; 8]`.
-    const fn parse_hex_u8_array(digits: &[u8; 32], offset: usize) -> [u8; 8] {
-        let mut result = [0u8; 8];
-        let mut i = 0;
-        while i < 8 {
-            let hi = Self::hex_digit_to_value(digits[offset + i * 2]);
-            let lo = Self::hex_digit_to_value(digits[offset + i * 2 + 1]);
-            result[i] = (hi << 4) | lo;
-            i += 1;
-        }
-        result
-    }
-
     /// Converts a single hex ASCII byte to its numeric value (0..15).
-    /// Caller must ensure `b` is a valid hex digit.
-    const fn hex_digit_to_value(b: u8) -> u8 {
-        match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => b - b'A' + 10,
+    /// Caller must ensure `digit` is a valid hex digit.
+    const fn hex_digit_to_value(digit: u8) -> u8 {
+        match digit {
+            b'0'..=b'9' => digit - b'0',
+            b'a'..=b'f' => digit - b'a' + 10,
+            b'A'..=b'F' => digit - b'A' + 10,
             _ => unreachable!(),
         }
     }
