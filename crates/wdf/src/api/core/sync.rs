@@ -5,7 +5,7 @@ use core::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
-    sync::atomic::{AtomicIsize, AtomicUsize, Ordering, fence},
+    sync::atomic::{AtomicIsize, Ordering, fence},
 };
 
 use wdk::println;
@@ -490,82 +490,6 @@ impl<T: RefCountedHandle> core::fmt::Debug for Opaque<T> {
         write!(f, "{ptr:p}")
     }
 }
-
-/// Thread-safe version of `OnceCell`
-///
-/// Like `OnceCell` it allows initialization only
-/// once and getting access to `&T` after that.
-/// All operations, including initialization, are
-/// thread-safe.
-///
-/// Compared to `OnceLock` it uses no locks
-/// and relies purely on atomic operations.
-pub struct AtomicOnceCell<T> {
-    init_state: AtomicUsize,
-    inner: UnsafeCell<Option<T>>,
-}
-
-const UNINITIALIZED: usize = 0;
-const INITIALIZING: usize = 1;
-const INITIALIZED: usize = 2;
-
-impl<T> AtomicOnceCell<T> {
-    /// Creates a new `AtomicOnceCell` instance
-    pub const fn new() -> Self {
-        Self {
-            init_state: AtomicUsize::new(UNINITIALIZED),
-            inner: UnsafeCell::new(None),
-        }
-    }
-
-    /// Initializes the cell with the given value.
-    ///
-    /// # Returns
-    /// Returns `Ok(())` if the cell was successfully initialized,
-    /// or `Err(value)` if it was already initialized.
-    pub fn set(&self, value: T) -> Result<(), T> {
-        if self
-            .init_state
-            .compare_exchange(
-                UNINITIALIZED,
-                INITIALIZING,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .is_ok()
-        {
-            unsafe { (*self.inner.get()) = Some(value) };
-            self.init_state.store(INITIALIZED, Ordering::Release);
-            Ok(())
-        } else {
-            Err(value)
-        }
-    }
-
-    /// Returns a reference to the inner value if the cell
-    /// is initialized.
-    ///
-    /// # Returns
-    /// `Some(&T)` if the cell is initialized, `None` otherwise.
-    pub fn get(&self) -> Option<&T> {
-        if self.init_state.load(Ordering::Acquire) == INITIALIZED {
-            unsafe { (*self.inner.get()).as_ref() }
-        } else {
-            None
-        }
-    }
-}
-
-/// `AtomicOnceCell` contains two pieces of data:
-/// the initialization state and the inner value `T`.
-/// The initialization state being atomic is automatically
-/// `Sync`. Therefore `AtomicOnceCell` is `Sync` if and
-/// only if `T` is `Sync`.
-unsafe impl<T> Sync for AtomicOnceCell<T> where T: Sync {}
-
-/// For the same reason as above, `AtomicOnceCell<T>` is
-// `Send` if and only if `T` is `Send`.
-unsafe impl<T> Send for AtomicOnceCell<T> where T: Send {}
 
 /// A thread-safe, `Option`-like container
 /// for a values that implement `Clone`.
