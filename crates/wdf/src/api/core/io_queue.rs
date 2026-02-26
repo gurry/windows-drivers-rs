@@ -150,14 +150,6 @@ impl IoQueueConfig {
             evt_io_stop: None,
         }
     }
-
-    /// Create a new `IoQueueConfig` with the specified dispatch type
-    /// and with `default_queue` set to `true`
-    pub fn new_default(dispatch_type: IoQueueDispatchType) -> Self {
-        let mut queue = Self::new(dispatch_type);
-        queue.default_queue = true;
-        queue
-    }
 }
 
 impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {

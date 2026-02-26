@@ -208,9 +208,10 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // amount of time to complete, or if the driver forwarded the requests
     // to a lower driver/another stack, the queue should have an
     // EvtIoStop/EvtIoResume.
-    let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Parallel {
+    let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Parallel {
         presented_requests_limit: None,
     });
+    queue_config.default_queue = true;
     queue_config.evt_io_device_control = Some(evt_io_device_control);
 
     let default_queue = IoQueue::create(device, &queue_config)

@@ -161,7 +161,7 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
 /// * `device`` - Handle to a framework device object.
 fn queue_initialize(device: &Device) -> NtResult<()> {
     // Create queue
-    let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
+    let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Sequential);
     queue_config.default_queue = true;
     queue_config.evt_io_read = Some(evt_io_read);
     queue_config.evt_io_write = Some(evt_io_write);
