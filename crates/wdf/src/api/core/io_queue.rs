@@ -4,6 +4,7 @@ use wdf_macros::object_context_with_ref_count_check;
 use wdk::nt_success;
 use wdk_sys::{
     _WDF_IO_QUEUE_DISPATCH_TYPE,
+    WDF_EXECUTION_LEVEL,
     WDF_IO_QUEUE_CONFIG,
     WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_NO_OBJECT_ATTRIBUTES,
@@ -15,8 +16,9 @@ use wdk_sys::{
 use super::{
     TriState,
     device::Device,
+    enum_mapping,
     init_wdf_struct,
-    object::{Handle, impl_ref_counted_handle},
+    object::{Handle, impl_ref_counted_handle, init_attributes},
     request::{Request, RequestId, RequestStopActionFlags},
     result::{NtResult, NtStatusError, StatusCodeExt, status_codes},
     sync::{Arc, Opaque},
@@ -29,12 +31,22 @@ impl IoQueue {
         let mut config: WDF_IO_QUEUE_CONFIG = queue_config.into();
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
+        let mut attributes_storage;
+        let attributes_ptr = match queue_config.execution_level {
+            Some(level) => {
+                attributes_storage = init_attributes();
+                attributes_storage.ExecutionLevel = level.into();
+                &mut attributes_storage as *mut _
+            }
+            None => WDF_NO_OBJECT_ATTRIBUTES,
+        };
+
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
                 device.as_ptr().cast(),
                 &mut config,
-                WDF_NO_OBJECT_ATTRIBUTES,
+                attributes_ptr,
                 &mut queue,
             )
         }
@@ -123,11 +135,21 @@ impl Into<WDF_IO_QUEUE_DISPATCH_TYPE> for IoQueueDispatchType {
     }
 }
 
+enum_mapping! {
+    infallible;
+    pub enum ExecutionLevel: WDF_EXECUTION_LEVEL {
+        InheritFromParent = WdfExecutionLevelInheritFromParent,
+        Passive = WdfExecutionLevelPassive,
+        Dispatch = WdfExecutionLevelDispatch,
+    }
+}
+
 pub struct IoQueueConfig {
     pub dispatch_type: IoQueueDispatchType,
     pub power_managed: TriState,
     pub allow_zero_length_requests: bool,
     pub default_queue: bool,
+    pub execution_level: Option<ExecutionLevel>,
     pub evt_io_default: Option<fn(&Opaque<IoQueue>, Request)>,
     pub evt_io_read: Option<fn(&Opaque<IoQueue>, Request, usize)>,
     pub evt_io_write: Option<fn(&Opaque<IoQueue>, Request, usize)>,
@@ -143,6 +165,7 @@ impl IoQueueConfig {
             power_managed: TriState::UseDefault,
             allow_zero_length_requests: false,
             default_queue: false,
+            execution_level: None,
             evt_io_default: None,
             evt_io_read: None,
             evt_io_write: None,
