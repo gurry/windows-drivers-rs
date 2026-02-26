@@ -315,27 +315,27 @@ fn object_context_impl(
         }
 
         impl #struct_name {
-            fn attach(fw_obj: &#fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
+            pub fn attach(fw_obj: &#fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::attach_context(fw_obj, context, #cleanup_callback_name, #attach_param_destroy_callback_name)
                 }
             }
 
-            fn get(fw_obj: &#fw_obj_type_name) -> &#struct_name where Self: Sync {
+            pub fn get(fw_obj: &#fw_obj_type_name) -> &#struct_name where Self: Sync {
                 Self::try_get(fw_obj).unwrap_or_else(|| Self::panic_on_missing_context())
             }
 
-            fn get_mut(fw_obj: &mut #fw_obj_type_name) -> &mut #struct_name where Self: Sync {
+            pub fn get_mut(fw_obj: &mut #fw_obj_type_name) -> &mut #struct_name where Self: Sync {
                 Self::try_get_mut(fw_obj).unwrap_or_else(|| Self::panic_on_missing_context())
             }
 
-            fn try_get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
+            pub fn try_get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::try_get_context(fw_obj)
                 }
             }
 
-            fn try_get_mut(fw_obj: &mut #fw_obj_type_name) -> Option<&mut #struct_name> where Self: Sync {
+            pub fn try_get_mut(fw_obj: &mut #fw_obj_type_name) -> Option<&mut #struct_name> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::try_get_context_mut(fw_obj)
                 }
