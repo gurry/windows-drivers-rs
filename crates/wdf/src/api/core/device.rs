@@ -267,7 +267,7 @@ impl Device {
     ///     &prop_data, &mut [],
     /// ) {
     ///     Err(QueryPropertyError::BufferTooSmall(size)) => size,
-    ///     other => panic!("expected BufferTooSmall"),
+    ///     other => panic!("Some other error"),
     /// };
     ///
     /// // Second call: retrieve the data.
@@ -280,7 +280,7 @@ impl Device {
         &self,
         property_data: &DevicePropertyData,
         buffer: &mut [u8],
-    ) -> Result<DevicePropertyType, QueryPropertyError> {
+    ) -> Result<(DevicePropertyType, u32), QueryPropertyError> {
         let raw_key: DEVPROPKEY = property_data.property_key.into();
         let mut raw_property_data = init_wdf_struct!(WDF_DEVICE_PROPERTY_DATA);
         raw_property_data.PropertyKey = &raw_key as *const DEVPROPKEY;
@@ -310,7 +310,7 @@ impl Device {
         }
 
         if status.is_success() {
-            Ok(DevicePropertyType(property_type))
+            Ok((DevicePropertyType(property_type), required_size))
         } else {
             Err(QueryPropertyError::NtStatus(NtStatusError::from(status)))
         }
