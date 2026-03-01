@@ -712,8 +712,7 @@ impl SentRequest {
 
     pub fn into_request(self, _token: RequestCompletionToken) -> Request {
         // _token is required only to ensure that
-        // caller is calling this from either evt_request_cancel
-        // or evt_request_completion_routine.
+        // caller is calling this from or evt_request_completion_routine
         self.0
     }
 }
