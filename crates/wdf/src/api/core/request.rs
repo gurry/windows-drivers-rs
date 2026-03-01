@@ -157,14 +157,14 @@ impl Request {
         Ok(())
     }
 
-    pub fn get_io_queue(&self) -> Option<&IoQueue> {
+    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
         unsafe {
             let queue =
                 call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr().cast());
             if queue.is_null() {
                 None
             } else {
-                Some(&*queue.cast::<IoQueue>())
+                Some(&*queue.cast::<Opaque<IoQueue>>())
             }
         }
     }
@@ -725,7 +725,7 @@ impl RequestCancellationToken {
         self.0.id()
     }
 
-    pub fn get_io_queue(&self) -> Option<&IoQueue> {
+    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
         self.0.get_io_queue()
     }
 }
@@ -742,7 +742,7 @@ impl RequestCompletionToken {
         self.0.id()
     }
 
-    pub fn get_io_queue(&self) -> Option<&IoQueue> {
+    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
         self.0.get_io_queue()
     }
 }

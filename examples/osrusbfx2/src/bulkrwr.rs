@@ -289,7 +289,9 @@ pub fn evt_io_stop(
 fn get_request(token: RequestCompletionToken) -> Option<Request> {
     let queue = token
         .get_io_queue()
-        .expect("Queue is available for this request");
+        .expect("Queue is available for this request")
+        .upgrade()
+        .expect("Queue must be upgradable to Arc");
 
     let device_context = DeviceContext::get(queue.get_device());
     device_context
