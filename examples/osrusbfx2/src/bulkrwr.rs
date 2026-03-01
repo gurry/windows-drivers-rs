@@ -275,14 +275,17 @@ pub fn evt_io_stop(
         };
 
         let device_context = DeviceContext::get(queue.get_device());
-        let Some(sent_request) = device_context.get_sent_request(request_id) else {
+
+        let sent_requests = device_context.sent_requests.lock();
+        let Some(pos) = sent_requests.iter().position(|r| r.id() == request_id) else {
             println!(
                 "evt_io_stop: request {:?} may have been already completed",
                 request_id
             );
             return;
         };
-        Request::cancel_sent_request(&sent_request);
+
+        Request::cancel_sent_request(sent_requests[pos].get_cancellation_token());
     }
 }
 

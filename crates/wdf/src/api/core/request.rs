@@ -317,8 +317,8 @@ impl Request {
         }
     }
 
-    pub fn cancel_sent_request(sent_request: &SentRequest) -> bool {
-        let request_ptr = sent_request.as_ptr() as WDFREQUEST;
+    pub fn cancel_sent_request(token: SentRequestCancellationToken<'_>) -> bool {
+        let request_ptr = token.0.as_ptr() as WDFREQUEST;
         let res =
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
 
@@ -689,6 +689,7 @@ impl Handle for CancellableRequest {
 }
 
 /// A request that has been sent to an I/O target.
+#[derive(Debug)]
 pub struct SentRequest(Request);
 
 impl SentRequest {
@@ -700,6 +701,10 @@ impl SentRequest {
         // _token is required only to ensure that
         // caller is calling this from or evt_request_completion_routine
         self.0
+    }
+
+    pub fn get_cancellation_token(&self) -> SentRequestCancellationToken<'_> {
+        SentRequestCancellationToken::new(self)
     }
 }
 
@@ -744,6 +749,46 @@ impl RequestCompletionToken {
 
     pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
         self.0.get_io_queue()
+    }
+}
+
+#[derive(Debug)]
+pub struct SentRequestCancellationToken<'a>(&'a SentRequest);
+
+impl<'a> SentRequestCancellationToken<'a> {
+    fn new(inner: &'a SentRequest) -> Self {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfObjectReferenceActual,
+                inner.as_ptr(),
+                core::ptr::null_mut(),
+                line!() as i32,
+                c"request.rs".as_ptr(),
+            );
+        }
+        Self(inner)
+    }
+
+    pub fn request_id(&self) -> RequestId {
+        self.0.id()
+    }
+
+    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
+        self.0.0.get_io_queue()
+    }
+}
+
+impl Drop for SentRequestCancellationToken<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfObjectDereferenceActual,
+                self.0.as_ptr(),
+                core::ptr::null_mut(),
+                0i32,
+                c"request.rs".as_ptr(),
+            );
+        }
     }
 }
 
