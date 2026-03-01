@@ -37,10 +37,15 @@ impl Guid {
     /// ```
     /// # use wdf::Guid;
     /// let guid = Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").unwrap();
-    /// assert_eq!(guid, Guid::from_values(
-    ///     0x2aa02ab1, 0xc26e, 0x431b,
-    ///     [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
-    /// ));
+    /// assert_eq!(
+    ///     guid,
+    ///     Guid::from_values(
+    ///         0x2AA02AB1,
+    ///         0xC26E,
+    ///         0x431B,
+    ///         [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
+    ///     )
+    /// );
     /// ```
     pub const fn parse(guid_str: &str) -> Result<Self, &'static str> {
         const ERR: &str = "Invalid GUID format: expected 32 hex digits, with optional dashes";
@@ -139,10 +144,10 @@ mod tests {
         let guid = Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").unwrap();
         assert_guid(
             &guid,
-            0x2aa02ab1,
-            0xc26e,
-            0x431b,
-            [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
+            0x2AA02AB1,
+            0xC26E,
+            0x431B,
+            [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
         );
     }
 
@@ -151,10 +156,10 @@ mod tests {
         let guid = Guid::parse("2aa02ab1c26e431b8efe85ee8de102e4").unwrap();
         assert_guid(
             &guid,
-            0x2aa02ab1,
-            0xc26e,
-            0x431b,
-            [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
+            0x2AA02AB1,
+            0xC26E,
+            0x431B,
+            [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
         );
     }
 
@@ -170,10 +175,10 @@ mod tests {
         let guid = Guid::parse("2aA02Ab1-c26E-431b-8EfE-85eE8De102e4").unwrap();
         assert_guid(
             &guid,
-            0x2aa02ab1,
-            0xc26e,
-            0x431b,
-            [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
+            0x2AA02AB1,
+            0xC26E,
+            0x431B,
+            [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
         );
     }
 
@@ -188,10 +193,10 @@ mod tests {
         let guid = Guid::parse("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
         assert_guid(
             &guid,
-            0xffffffff,
-            0xffff,
-            0xffff,
-            [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+            0xFFFFFFFF,
+            0xFFFF,
+            0xFFFF,
+            [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
         );
     }
 
@@ -223,10 +228,10 @@ mod tests {
         };
         assert_guid(
             &GUID,
-            0x2aa02ab1,
-            0xc26e,
-            0x431b,
-            [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
+            0x2AA02AB1,
+            0xC26E,
+            0x431B,
+            [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
         );
     }
 
@@ -242,10 +247,10 @@ mod tests {
         let guid = Guid::parse("2a-a02ab1c2-6e431b8efe85ee8d-e102e4").unwrap();
         assert_guid(
             &guid,
-            0x2aa02ab1,
-            0xc26e,
-            0x431b,
-            [0x8e, 0xfe, 0x85, 0xee, 0x8d, 0xe1, 0x02, 0xe4],
+            0x2AA02AB1,
+            0xC26E,
+            0x431B,
+            [0x8E, 0xFE, 0x85, 0xEE, 0x8D, 0xE1, 0x02, 0xE4],
         );
     }
 

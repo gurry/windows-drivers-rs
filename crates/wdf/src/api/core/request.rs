@@ -25,7 +25,7 @@ use super::{
     memory::{Memory, OwnedMemory},
     object::{Handle, init_attributes},
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt, status_codes},
-    sync::{Opaque, SpinLock},
+    sync::Opaque,
 };
 use crate::usb::UsbRequestCompletionParams;
 
@@ -101,10 +101,8 @@ impl Request {
     /// Returns the I/O status information value for the request.
     pub fn get_information(&self) -> usize {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestGetInformation,
-                self.as_ptr().cast()
-            ) as usize
+            call_unsafe_wdf_function_binding!(WdfRequestGetInformation, self.as_ptr().cast())
+                as usize
         }
     }
 
@@ -126,52 +124,36 @@ impl Request {
         RequestParameters(params)
     }
 
-    pub fn mark_cancellable<S: CancellableRequestStore>(
+    pub fn mark_cancellable(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
-        cancellable_request_store: &SpinLock<S>,
-    ) -> Result<(), (NtStatusError, Request)> {
-        if let Err(e) = self.set_cancel_callback_in_context(cancel_fn) {
+    ) -> Result<CancellableRequest, (NtStatusError, Request)> {
+        if let Err(e) = self.set_cancel_callback_in_context(Some(cancel_fn)) {
             return Err((e, self));
         }
-
-        let req_ptr = self.as_ptr() as WDFREQUEST;
-
-        // Save cancellable request in store before
-        // we set the cancel callback to avoid
-        // race condition
-        let request_id = self.id();
-        let mut store = cancellable_request_store.lock();
-        store.add(CancellableRequest(self));
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestMarkCancelableEx,
-                req_ptr,
+                self.as_ptr() as WDFREQUEST,
                 Some(__evt_request_cancel)
             )
         };
 
         if !status.is_success() {
-            // Remove cancellable request from store
-            // since we failed to set cancellable
-            let _ = store
-                .take(request_id)
-                .expect("CancellableRequest not found although it was just added");
-            Err((NtStatusError::from(status), unsafe {
-                Request::from_raw(req_ptr)
-            }))
+            let _ = self.set_cancel_callback_in_context(None); // Will not fail this time
+            Err((NtStatusError::from(status), self))
         } else {
-            Ok(())
+            Ok(CancellableRequest(self))
         }
     }
 
     fn set_cancel_callback_in_context(
         &mut self,
-        cancel_fn: fn(&RequestCancellationToken),
+        cancel_fn: Option<fn(&RequestCancellationToken)>,
     ) -> NtResult<()> {
         let context = self.get_context_mut_or_attach_new()?;
-        context.evt_request_cancel = Some(cancel_fn);
+        context.evt_request_cancel = cancel_fn;
         Ok(())
     }
 
@@ -344,12 +326,15 @@ impl Request {
     ///
     /// The `status` parameter specifies the NTSTATUS value to set
     /// in the reused request's IRP.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A tuple containing the input and output user memory associated
     /// with the request from earlier, if any.
-    pub fn reuse(&mut self, status: NtStatus) -> NtResult<(Option<OwnedMemory>, Option<OwnedMemory>)> {
+    pub fn reuse(
+        &mut self,
+        status: NtStatus,
+    ) -> NtResult<(Option<OwnedMemory>, Option<OwnedMemory>)> {
         let mut reuse_params = init_wdf_struct!(WDF_REQUEST_REUSE_PARAMS);
         reuse_params.Flags = 0; // WDF_REQUEST_REUSE_NO_FLAGS
         reuse_params.Status = status.code();
@@ -362,8 +347,10 @@ impl Request {
                 &mut reuse_params,
             )
         }
-        .map(|| {  
-            (unsafe { self.retrieve_user_input_memory() }, unsafe { self.retrieve_user_output_memory() })
+        .map(|| {
+            (unsafe { self.retrieve_user_input_memory() }, unsafe {
+                self.retrieve_user_output_memory()
+            })
         })
     }
 
@@ -387,12 +374,7 @@ impl Request {
     /// pointer. We would want to wrap it in safe abstractions
     /// or get rid of this function entirely.
     pub fn wdm_get_irp(&self) -> wdk_sys::PIRP {
-        unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestWdmGetIrp,
-                self.as_ptr().cast(),
-            )
-        }
+        unsafe { call_unsafe_wdf_function_binding!(WdfRequestWdmGetIrp, self.as_ptr().cast(),) }
     }
 }
 
@@ -478,9 +460,9 @@ macro_rules! define_user_memory_context {
 
         impl Request {
             /// Extracts user memory if available
-            /// 
+            ///
             /// # Safety
-            /// 
+            ///
             /// It is possible the formatting info in WDFREQUEST is
             /// refrencing this memory. Make sure the request is not
             /// formatted before calling this method. Because of this

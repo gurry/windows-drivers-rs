@@ -69,9 +69,8 @@ impl IoQueue {
     }
 
     pub fn get_device(&self) -> &Device {
-        let device_ptr = unsafe {
-            call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast())
-        };
+        let device_ptr =
+            unsafe { call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast()) };
 
         unsafe { &*(device_ptr.cast::<Device>()) }
     }

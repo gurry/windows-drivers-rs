@@ -1,10 +1,6 @@
 use alloc::string::String;
 
-use wdk_sys::{
-    WDFKEY,
-    WDFOBJECT,
-    call_unsafe_wdf_function_binding,
-};
+use wdk_sys::{WDFKEY, WDFOBJECT, call_unsafe_wdf_function_binding};
 
 use super::{
     object::Handle,
@@ -87,4 +83,3 @@ impl From<RegistryAccessRights> for u32 {
         }
     }
 }
-

@@ -62,9 +62,7 @@ impl<T> SpinLock<T> {
         unsafe {
             call_unsafe_wdf_function_binding!(WdfSpinLockAcquire, self.wdf_spin_lock);
         }
-        SpinLockGuard {
-            spin_lock: self,
-        }
+        SpinLockGuard { spin_lock: self }
     }
 }
 
@@ -820,8 +818,8 @@ impl<T> Deref for InnerAtomicRef<'_, T> {
     fn deref(&self) -> &Self::Target {
         // SAFETY: `InnerAtomicRef` is only created inside
         // `borrow_inner` after confirming that the `Option`
-        // is `Some`. The `Option` cannot be changed back to 
-        // `None` while `inner` borrow is alive. Therefore it is 
+        // is `Some`. The `Option` cannot be changed back to
+        // `None` while `inner` borrow is alive. Therefore it is
         // safe to use `unwrap_unchecked`
         unsafe { self.inner.as_ref().unwrap_unchecked() }
     }

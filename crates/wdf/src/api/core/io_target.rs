@@ -2,6 +2,7 @@ use core::{ptr, sync::atomic::AtomicIsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
+    _WDF_REQUEST_SEND_OPTIONS_FLAGS,
     NT_SUCCESS,
     PWDFMEMORY_OFFSET,
     WDF_IO_TARGET_SENT_IO_ACTION,
@@ -11,7 +12,6 @@ use wdk_sys::{
     WDFIOTARGET,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
-    _WDF_REQUEST_SEND_OPTIONS_FLAGS,
     call_unsafe_wdf_function_binding,
 };
 
@@ -166,13 +166,13 @@ impl IoTarget {
     /// Sends a device I/O control request synchronously.
     ///
     /// # Arguments
-    /// * `request` - Optional request object. If `None`, the framework
-    ///   uses an internal request object.
+    /// * `request` - Optional request object. If `None`, the framework uses an
+    ///   internal request object.
     /// * `ioctl_code` - The I/O control code (IOCTL)
     /// * `input_buffer` - Optional input buffer descriptor
     /// * `output_buffer` - Optional output buffer descriptor
-    /// * `timeout` - Optional timeout for the request. If `None`,
-    ///   the request will wait indefinitely.
+    /// * `timeout` - Optional timeout for the request. If `None`, the request
+    ///   will wait indefinitely.
     ///
     /// Returns the number of bytes returned by the target on success.
     pub fn send_ioctl_synchronously(
@@ -183,32 +183,25 @@ impl IoTarget {
         output_buffer: Option<&mut MemoryDescriptorMut<'_>>,
         timeout: Option<Timeout>,
     ) -> NtResult<usize> {
-        let input_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
-            input_buffer.map(|b| b.into());
-        let input_descriptor_ptr = input_descriptor
-            .as_ref()
-            .map_or(ptr::null_mut(), |desc| {
-                (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
-            });
+        let input_descriptor: Option<WDF_MEMORY_DESCRIPTOR> = input_buffer.map(|b| b.into());
+        let input_descriptor_ptr = input_descriptor.as_ref().map_or(ptr::null_mut(), |desc| {
+            (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
+        });
 
-        let output_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
-            output_buffer.map(|b| (&*b).into());
-        let output_descriptor_ptr = output_descriptor
-            .as_ref()
-            .map_or(ptr::null_mut(), |desc| {
-                (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
-            });
+        let output_descriptor: Option<WDF_MEMORY_DESCRIPTOR> = output_buffer.map(|b| (&*b).into());
+        let output_descriptor_ptr = output_descriptor.as_ref().map_or(ptr::null_mut(), |desc| {
+            (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
+        });
 
         let mut send_options: Option<WDF_REQUEST_SEND_OPTIONS> = timeout.map(|t| {
             let mut opts = init_wdf_struct!(WDF_REQUEST_SEND_OPTIONS);
-            opts.Flags |=
-                _WDF_REQUEST_SEND_OPTIONS_FLAGS::WDF_REQUEST_SEND_OPTION_TIMEOUT as u32;
+            opts.Flags |= _WDF_REQUEST_SEND_OPTIONS_FLAGS::WDF_REQUEST_SEND_OPTION_TIMEOUT as u32;
             opts.Timeout = t.as_wdf_timeout();
             opts
         });
-        let send_options_ptr = send_options
-            .as_mut()
-            .map_or(ptr::null_mut(), |opts| opts as *mut WDF_REQUEST_SEND_OPTIONS);
+        let send_options_ptr = send_options.as_mut().map_or(ptr::null_mut(), |opts| {
+            opts as *mut WDF_REQUEST_SEND_OPTIONS
+        });
 
         let mut bytes_returned: u64 = 0;
 

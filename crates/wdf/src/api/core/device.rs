@@ -1,15 +1,12 @@
-use core::{
-    default::Default,
-    sync::atomic::AtomicIsize,
-};
+use core::{default::Default, sync::atomic::AtomicIsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     BOOLEAN,
-    DEVPROPKEY,
-    DEVPROPTYPE,
     DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
+    DEVPROPKEY,
+    DEVPROPTYPE,
     NTSTATUS,
     WDF_DEVICE_FAILED_ACTION,
     WDF_DEVICE_IO_TYPE,
@@ -367,35 +364,35 @@ impl From<NtStatusError> for QueryPropertyError {
 pub struct DevicePropertyType(DEVPROPTYPE);
 
 impl DevicePropertyType {
-    pub const EMPTY: Self = Self(wdk_sys::DEVPROP_TYPE_EMPTY);
-    pub const NULL: Self = Self(wdk_sys::DEVPROP_TYPE_NULL);
-    pub const SBYTE: Self = Self(wdk_sys::DEVPROP_TYPE_SBYTE);
+    pub const BINARY: Self = Self(wdk_sys::DEVPROP_TYPE_BINARY);
+    pub const BOOLEAN: Self = Self(wdk_sys::DEVPROP_TYPE_BOOLEAN);
     pub const BYTE: Self = Self(wdk_sys::DEVPROP_TYPE_BYTE);
-    pub const INT16: Self = Self(wdk_sys::DEVPROP_TYPE_INT16);
-    pub const UINT16: Self = Self(wdk_sys::DEVPROP_TYPE_UINT16);
-    pub const INT32: Self = Self(wdk_sys::DEVPROP_TYPE_INT32);
-    pub const UINT32: Self = Self(wdk_sys::DEVPROP_TYPE_UINT32);
-    pub const INT64: Self = Self(wdk_sys::DEVPROP_TYPE_INT64);
-    pub const UINT64: Self = Self(wdk_sys::DEVPROP_TYPE_UINT64);
-    pub const FLOAT: Self = Self(wdk_sys::DEVPROP_TYPE_FLOAT);
-    pub const DOUBLE: Self = Self(wdk_sys::DEVPROP_TYPE_DOUBLE);
-    pub const DECIMAL: Self = Self(wdk_sys::DEVPROP_TYPE_DECIMAL);
-    pub const GUID: Self = Self(wdk_sys::DEVPROP_TYPE_GUID);
     pub const CURRENCY: Self = Self(wdk_sys::DEVPROP_TYPE_CURRENCY);
     pub const DATE: Self = Self(wdk_sys::DEVPROP_TYPE_DATE);
+    pub const DECIMAL: Self = Self(wdk_sys::DEVPROP_TYPE_DECIMAL);
+    pub const DEVPROPKEY: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPKEY);
+    pub const DEVPROPTYPE: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPTYPE);
+    pub const DOUBLE: Self = Self(wdk_sys::DEVPROP_TYPE_DOUBLE);
+    pub const EMPTY: Self = Self(wdk_sys::DEVPROP_TYPE_EMPTY);
+    pub const ERROR: Self = Self(wdk_sys::DEVPROP_TYPE_ERROR);
     pub const FILETIME: Self = Self(wdk_sys::DEVPROP_TYPE_FILETIME);
-    pub const BOOLEAN: Self = Self(wdk_sys::DEVPROP_TYPE_BOOLEAN);
-    pub const STRING: Self = Self(wdk_sys::DEVPROP_TYPE_STRING);
+    pub const FLOAT: Self = Self(wdk_sys::DEVPROP_TYPE_FLOAT);
+    pub const GUID: Self = Self(wdk_sys::DEVPROP_TYPE_GUID);
+    pub const INT16: Self = Self(wdk_sys::DEVPROP_TYPE_INT16);
+    pub const INT32: Self = Self(wdk_sys::DEVPROP_TYPE_INT32);
+    pub const INT64: Self = Self(wdk_sys::DEVPROP_TYPE_INT64);
+    pub const NTSTATUS: Self = Self(wdk_sys::DEVPROP_TYPE_NTSTATUS);
+    pub const NULL: Self = Self(wdk_sys::DEVPROP_TYPE_NULL);
+    pub const SBYTE: Self = Self(wdk_sys::DEVPROP_TYPE_SBYTE);
     pub const SECURITY_DESCRIPTOR: Self = Self(wdk_sys::DEVPROP_TYPE_SECURITY_DESCRIPTOR);
     pub const SECURITY_DESCRIPTOR_STRING: Self =
         Self(wdk_sys::DEVPROP_TYPE_SECURITY_DESCRIPTOR_STRING);
-    pub const DEVPROPKEY: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPKEY);
-    pub const DEVPROPTYPE: Self = Self(wdk_sys::DEVPROP_TYPE_DEVPROPTYPE);
-    pub const ERROR: Self = Self(wdk_sys::DEVPROP_TYPE_ERROR);
-    pub const NTSTATUS: Self = Self(wdk_sys::DEVPROP_TYPE_NTSTATUS);
+    pub const STRING: Self = Self(wdk_sys::DEVPROP_TYPE_STRING);
     pub const STRING_INDIRECT: Self = Self(wdk_sys::DEVPROP_TYPE_STRING_INDIRECT);
-    pub const BINARY: Self = Self(wdk_sys::DEVPROP_TYPE_BINARY);
     pub const STRING_LIST: Self = Self(wdk_sys::DEVPROP_TYPE_STRING_LIST);
+    pub const UINT16: Self = Self(wdk_sys::DEVPROP_TYPE_UINT16);
+    pub const UINT32: Self = Self(wdk_sys::DEVPROP_TYPE_UINT32);
+    pub const UINT64: Self = Self(wdk_sys::DEVPROP_TYPE_UINT64);
 
     /// Returns the raw `DEVPROPTYPE` value.
     pub fn raw(&self) -> DEVPROPTYPE {
@@ -600,8 +597,7 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit: Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
-    pub evt_device_prepare_hardware:
-        Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
+    pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
     pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
     pub evt_device_self_managed_io_flush: Option<fn(&Device)>,

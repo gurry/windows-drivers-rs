@@ -4,6 +4,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
+use wdf_macros::object_context;
 #[doc(hidden)]
 pub use wdk_sys::{
     DRIVER_OBJECT,
@@ -14,7 +15,6 @@ pub use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDFOBJECT,
 };
-use wdf_macros::object_context;
 use wdk_sys::{
     WDF_DRIVER_CONFIG,
     WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
@@ -87,8 +87,7 @@ impl Driver {
 
         let mut wdf_driver: WDFDRIVER = ptr::null_mut();
 
-        let reg_path_ptr: PCUNICODE_STRING =
-            (registry_path as *const UnicodeString).cast();
+        let reg_path_ptr: PCUNICODE_STRING = (registry_path as *const UnicodeString).cast();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -183,13 +182,11 @@ pub fn call_safe_driver_entry(
 
     // SAFETY: `UnicodeString` is `#[repr(transparent)]` over `UNICODE_STRING`,
     // so casting `PCUNICODE_STRING` to `&UnicodeString` preserves pointer identity.
-    let registry_path: &UnicodeString =
-        unsafe { &*(reg_path.cast::<UnicodeString>()) };
+    let registry_path: &UnicodeString = unsafe { &*(reg_path.cast::<UnicodeString>()) };
 
     if let Some(control_guid) = tracing_control_guid {
-        let trace_writer = unsafe {
-            TraceWriter::init(control_guid, &mut driver_object.0, reg_path)
-        };
+        let trace_writer =
+            unsafe { TraceWriter::init(control_guid, &mut driver_object.0, reg_path) };
 
         trace_writer.start();
 

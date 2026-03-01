@@ -148,7 +148,7 @@ pub fn to_string_lossy(unicode_str: UNICODE_STRING) -> String {
 
 /// A wrapper for `UNICODE_STRING`
 /// `'a` represents the lifetime of the underlying buffer
-/// 
+///
 /// This type has `repr(transparent)` to ensure `&UnicodeString`
 /// can be safely cast to `PUNICODE_STRING`
 #[repr(transparent)]
@@ -172,4 +172,4 @@ impl<'a> UnicodeString<'a> {
     pub fn as_raw(&self) -> &UNICODE_STRING {
         &self.unicode_str
     }
-}   
+}

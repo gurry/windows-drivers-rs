@@ -23,7 +23,6 @@ use core::time::Duration;
 use wdf::{
     driver_entry,
     object_context,
-    Opaque,
     println,
     status_codes,
     trace,
@@ -39,6 +38,7 @@ use wdf::{
     IoQueueConfig,
     IoQueueDispatchType,
     NtResult,
+    Opaque,
     PnpPowerEventCallbacks,
     Request,
     RequestCancellationToken,
@@ -300,9 +300,20 @@ fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
 
     request.set_information(length);
 
-    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
-        println!("evt_io_write failed to mark request cancellable: {e:?}");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
+    let mut req_opt = context.request.lock();
+
+    match request.mark_cancellable(evt_request_cancel) {
+        Ok(request) => {
+            *req_opt = Some(request);
+        }
+        Err((e, request)) => {
+            println!("evt_io_read failed to mark request cancellable: {e:?}");
+            request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO:
+                                                                        // decide
+                                                                        // on the
+                                                                        // status
+                                                                        // code here
+        }
     }
 }
 
@@ -359,9 +370,20 @@ fn evt_io_write(queue: &Opaque<IoQueue>, request: Request, length: usize) {
 
     request.set_information(length);
 
-    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
-        println!("evt_io_write failed to mark request cancellable: {e:?}");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
+    let mut req_opt = context.request.lock();
+
+    match request.mark_cancellable(evt_request_cancel) {
+        Ok(request) => {
+            *req_opt = Some(request);
+        }
+        Err((e, request)) => {
+            println!("evt_io_write failed to mark request cancellable: {e:?}");
+            request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO:
+                                                                        // decide
+                                                                        // on the
+                                                                        // status
+                                                                        // code here
+        }
     }
 }
 
