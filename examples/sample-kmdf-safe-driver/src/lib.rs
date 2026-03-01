@@ -397,7 +397,7 @@ fn evt_io_write(queue: &Opaque<IoQueue>, request: Request, length: usize) {
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
 
-    let queue = token.get_io_queue();
+    let queue = token.get_io_queue().expect("Queue must be available for this request");
 
     let context = QueueContext::get(&queue);
 

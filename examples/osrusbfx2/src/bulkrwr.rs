@@ -287,7 +287,10 @@ pub fn evt_io_stop(
 }
 
 fn get_request(token: RequestCompletionToken) -> Option<Request> {
-    let queue = token.get_io_queue();
+    let queue = token
+        .get_io_queue()
+        .expect("Queue is available for this request");
+
     let device_context = DeviceContext::get(queue.get_device());
     device_context
         .get_sent_request(token.request_id())
