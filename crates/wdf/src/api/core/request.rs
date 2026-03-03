@@ -158,15 +158,7 @@ impl Request {
     }
 
     pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
-        unsafe {
-            let queue =
-                call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr().cast());
-            if queue.is_null() {
-                None
-            } else {
-                Some(&*queue.cast::<Opaque<IoQueue>>())
-            }
-        }
+        unsafe { Self::get_io_queue_from_raw(self.0) }
     }
 
     pub fn retrieve_input_memory(&self) -> NtResult<&Memory> {
@@ -311,16 +303,18 @@ impl Request {
     }
 
     pub fn stop_acknowledge_no_requeue(request_id: RequestId) {
-        let request_ptr = request_id.0 as WDFREQUEST;
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, request_ptr, 0);
+            call_unsafe_wdf_function_binding!(
+                WdfRequestStopAcknowledge,
+                request_id.0 as WDFREQUEST,
+                0
+            );
         }
     }
 
-    pub fn cancel_sent_request(token: SentRequestCancellationToken<'_>) -> bool {
-        let request_ptr = token.0.as_ptr() as WDFREQUEST;
+    pub fn cancel_sent_request(token: &SentRequestCancellationToken) -> bool {
         let res =
-            unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
+            unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, token.0) };
 
         res != 0
     }
@@ -356,6 +350,17 @@ impl Request {
                 self.retrieve_user_output_memory()
             })
         })
+    }
+
+    unsafe fn get_io_queue_from_raw<'a>(raw_request: WDFREQUEST) -> Option<&'a Opaque<IoQueue>> {
+        unsafe {
+            let queue = call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, raw_request);
+            if queue.is_null() {
+                None
+            } else {
+                Some(&*queue.cast::<Opaque<IoQueue>>())
+            }
+        }
     }
 
     fn get_context_mut_or_attach_new(&mut self) -> NtResult<&mut RequestContext> {
@@ -703,8 +708,8 @@ impl SentRequest {
         self.0
     }
 
-    pub fn get_cancellation_token(&self) -> SentRequestCancellationToken<'_> {
-        SentRequestCancellationToken::new(self)
+    pub fn get_cancellation_token(&self) -> SentRequestCancellationToken {
+        unsafe { SentRequestCancellationToken::new(self.0.as_ptr().cast()) }
     }
 }
 
@@ -753,14 +758,14 @@ impl RequestCompletionToken {
 }
 
 #[derive(Debug)]
-pub struct SentRequestCancellationToken<'a>(&'a SentRequest);
+pub struct SentRequestCancellationToken(WDFREQUEST);
 
-impl<'a> SentRequestCancellationToken<'a> {
-    fn new(inner: &'a SentRequest) -> Self {
+impl SentRequestCancellationToken {
+    unsafe fn new(inner: WDFREQUEST) -> Self {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfObjectReferenceActual,
-                inner.as_ptr(),
+                inner.cast(),
                 core::ptr::null_mut(),
                 line!() as i32,
                 c"request.rs".as_ptr(),
@@ -770,22 +775,22 @@ impl<'a> SentRequestCancellationToken<'a> {
     }
 
     pub fn request_id(&self) -> RequestId {
-        self.0.id()
+        RequestId(self.0 as usize)
     }
 
     pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
-        self.0.0.get_io_queue()
+        unsafe { Request::get_io_queue_from_raw(self.0) }
     }
 }
 
-impl Drop for SentRequestCancellationToken<'_> {
+impl Drop for SentRequestCancellationToken {
     fn drop(&mut self) {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfObjectDereferenceActual,
-                self.0.as_ptr(),
+                self.0.cast(),
                 core::ptr::null_mut(),
-                0i32,
+                line!() as i32,
                 c"request.rs".as_ptr(),
             );
         }
