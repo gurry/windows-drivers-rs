@@ -1,4 +1,4 @@
-use core::{mem, ptr, sync::atomic::AtomicIsize};
+use core::{mem, ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
@@ -71,7 +71,7 @@ impl UsbDevice {
         }
         .and_then(|| {
             let ctxt = UsbDeviceContext {
-                ref_count: AtomicIsize::new(0),
+                ref_count: AtomicUsize::new(0),
             };
 
             UsbDeviceContext::attach(unsafe { &*(usb_device.cast()) }, ctxt)?;
@@ -119,13 +119,7 @@ impl UsbDevice {
         .map(|| information.into())
     }
 
-    pub fn select_config_single_interface<'a>(
-        // `&mut self` ensures there are no outstanding references to
-        // any `UsbPipe`s of this device while we are selecting a config
-        // because the change in config could internally delete them
-        // causing those references to dangle
-        &'a mut self,
-    ) -> NtResult<UsbSingleInterfaceInformation<'a>> {
+    pub fn select_config_single_interface(&self) -> NtResult<UsbSingleInterfaceInformation<'_>> {
         let mut config = init_wdf_struct!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
             _WdfUsbTargetDeviceSelectConfigType::WdfUsbTargetDeviceSelectConfigTypeSingleInterface;
@@ -151,11 +145,6 @@ impl UsbDevice {
     pub fn get_interface(&self, interface_index: u8) -> Option<&UsbInterface> {
         let interface = self.get_interface_ptr(interface_index);
         unsafe { (interface.cast::<UsbInterface>()).as_ref() }
-    }
-
-    pub fn get_interface_mut(&mut self, interface_index: u8) -> Option<&mut UsbInterface> {
-        let interface = self.get_interface_ptr(interface_index);
-        unsafe { (interface.cast::<UsbInterface>()).as_mut() }
     }
 
     pub fn reset_port_synchronously(&self) -> NtResult<()> {
@@ -218,7 +207,7 @@ impl UsbDevice {
 
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
-    ref_count: AtomicIsize,
+    ref_count: AtomicUsize,
 }
 
 pub struct UsbDeviceCreateConfig {
@@ -298,32 +287,7 @@ impl UsbInterface {
             })
     }
 
-    pub fn get_configured_pipe_mut<'a>(&mut self, pipe_index: u8) -> Option<&'a mut UsbPipe> {
-        self.get_configured_pipe_impl(pipe_index, false)
-            .map(|(pipe, _)| unsafe { &mut *(pipe.cast::<UsbPipe>()) })
-    }
-
-    pub fn get_configured_pipe_with_information_mut<'a>(
-        &mut self,
-        pipe_index: u8,
-    ) -> Option<(&'a mut UsbPipe, UsbPipeInformation)> {
-        self.get_configured_pipe_impl(pipe_index, true)
-            .map(|(pipe, info)| {
-                (
-                    unsafe { &mut *(pipe.cast::<UsbPipe>()) },
-                    info.expect("framework should return pipe information if pipe exists"),
-                )
-            })
-    }
-
-    pub fn select_setting(
-        // `&mut self` ensures there are no outstanding references to
-        // any `UsbPipe`s of this interface while we are selecting a config
-        // because the change in config could internally delete them
-        // causing those references to dangle
-        &mut self,
-        params: &UsbInterfaceSelectSettingParams,
-    ) -> NtResult<()> {
+    pub fn select_setting(&self, params: &UsbInterfaceSelectSettingParams) -> NtResult<()> {
         let mut raw_params = init_wdf_struct!(WDF_USB_INTERFACE_SELECT_SETTING_PARAMS);
         let mut raw_descriptor: USB_INTERFACE_DESCRIPTOR;
 
@@ -441,10 +405,11 @@ impl UsbPipe {
         }
     }
 
-    pub fn config_continuous_reader(&mut self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
-        if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get_mut(self) {
-            ctxt.read_complete_callback = config.read_complete_callback;
-            ctxt.readers_failed_callback = config.readers_failed_callback;
+    pub fn config_continuous_reader(&self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
+        if let Some(_ctxt) = UsbPipeContinuousReaderContext::try_get(self) {
+            // TODO: yet to implement this safely using interior mutability
+            // ctxt.read_complete_callback = config.read_complete_callback;
+            // ctxt.readers_failed_callback = config.readers_failed_callback;
         } else {
             let ctxt = UsbPipeContinuousReaderContext {
                 read_complete_callback: config.read_complete_callback,

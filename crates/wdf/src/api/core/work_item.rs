@@ -1,4 +1,4 @@
-use core::{ptr::null_mut, sync::atomic::AtomicIsize};
+use core::{ptr::null_mut, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{WDF_WORKITEM_CONFIG, WDFWORKITEM, call_unsafe_wdf_function_binding};
@@ -8,7 +8,7 @@ use super::{
     init_wdf_struct,
     object::{Handle, impl_ref_counted_handle, init_attributes},
     result::{NtResult, StatusCodeExt},
-    sync::{Arc, Opaque},
+    sync::Arc,
 };
 
 impl_ref_counted_handle!(WorkItem, WorkItemContext);
@@ -21,7 +21,7 @@ impl WorkItem {
     /// subsequently picked up by a system worker thread.
     pub fn create(parent: &Device, config: &WorkItemConfig) -> NtResult<Arc<Self>> {
         let context = WorkItemContext {
-            ref_count: AtomicIsize::new(0),
+            ref_count: AtomicUsize::new(0),
             evt_work_item_func: config.evt_work_item_func,
         };
 
@@ -93,7 +93,7 @@ impl WorkItem {
 /// Configuration for creating a [`WorkItem`].
 pub struct WorkItemConfig {
     /// The callback function invoked when the work item executes.
-    pub evt_work_item_func: fn(&Opaque<WorkItem>),
+    pub evt_work_item_func: fn(&WorkItem),
     /// Whether the framework synchronizes execution of the work
     /// item callback with callbacks from other objects in the
     /// parent's synchronization scope. Defaults to `false`.
@@ -103,7 +103,7 @@ pub struct WorkItemConfig {
 impl WorkItemConfig {
     /// Creates a new `WorkItemConfig` with the given callback.
     /// `automatic_serialization` defaults to `false`.
-    pub fn new(evt_work_item_func: fn(&Opaque<WorkItem>)) -> Self {
+    pub fn new(evt_work_item_func: fn(&WorkItem)) -> Self {
         Self {
             evt_work_item_func,
             automatic_serialization: false,
@@ -123,13 +123,13 @@ impl From<&WorkItemConfig> for WDF_WORKITEM_CONFIG {
 
 #[object_context_with_ref_count_check(WorkItem)]
 struct WorkItemContext {
-    ref_count: AtomicIsize,
-    evt_work_item_func: fn(&Opaque<WorkItem>),
+    ref_count: AtomicUsize,
+    evt_work_item_func: fn(&WorkItem),
 }
 
 pub extern "C" fn __evt_work_item_func(work_item: WDFWORKITEM) {
     let work_item_ref = unsafe { &*work_item.cast::<WorkItem>() };
     let work_item_state = WorkItemContext::get(work_item_ref);
-    let work_item = unsafe { &*work_item.cast::<Opaque<WorkItem>>() };
+    let work_item = unsafe { &*work_item.cast::<WorkItem>() };
     (work_item_state.evt_work_item_func)(work_item);
 }

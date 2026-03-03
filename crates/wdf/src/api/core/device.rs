@@ -1,4 +1,4 @@
-use core::{default::Default, sync::atomic::AtomicIsize};
+use core::{default::Default, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
@@ -81,7 +81,7 @@ impl Device {
             DeviceContext::attach(
                 device,
                 DeviceContext {
-                    ref_count: AtomicIsize::new(0),
+                    ref_count: AtomicUsize::new(0),
                     pnp_power_callbacks,
                 },
             )?;
@@ -586,7 +586,7 @@ impl Default for DevicePnpCapabilities {
 
 #[object_context_with_ref_count_check(Device)]
 struct DeviceContext {
-    ref_count: AtomicIsize,
+    ref_count: AtomicUsize,
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }
 

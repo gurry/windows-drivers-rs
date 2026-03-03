@@ -14,7 +14,7 @@ use crate::{DeviceContext, SwitchState, ioctl::usb_ioctl_get_interrupt_message};
 
 /// This routine configures a continuous reader on the
 /// interrupt endpoint. It's called from the PrepareHardware event
-pub fn cont_reader_for_interrupt_endpoint(pipe: &mut UsbPipe) -> NtResult<()> {
+pub fn cont_reader_for_interrupt_endpoint(pipe: &UsbPipe) -> NtResult<()> {
     let mut config = UsbContinuousReaderConfig::new(64, Some(evt_usb_interrupt_pipe_read_complete));
     config.readers_failed_callback = Some(evt_usb_target_pipe_readers_failed);
 

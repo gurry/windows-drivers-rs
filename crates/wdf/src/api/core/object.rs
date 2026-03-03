@@ -2,7 +2,7 @@ use alloc::string::String;
 use core::{
     marker::PhantomData,
     ptr,
-    sync::atomic::{AtomicIsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use wdk_sys::{
@@ -26,7 +26,7 @@ pub trait Handle {
 }
 
 pub trait RefCountedHandle: Handle {
-    fn get_ref_count(&self) -> &AtomicIsize;
+    fn get_ref_count(&self) -> &AtomicUsize;
 }
 
 macro_rules! impl_handle {
@@ -64,7 +64,7 @@ macro_rules! impl_ref_counted_handle {
         crate::api::object::impl_handle!($obj);
 
         impl crate::api::object::RefCountedHandle for $obj {
-            fn get_ref_count(&self) -> &core::sync::atomic::AtomicIsize {
+            fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
                 let inner_context = <$inner_context>::get(self);
                 &inner_context.ref_count
             }

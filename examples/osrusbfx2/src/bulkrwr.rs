@@ -4,7 +4,6 @@
 use wdf::{
     IoQueue,
     IoTarget,
-    Opaque,
     Request,
     RequestCompletionParamDetails,
     RequestCompletionToken,
@@ -27,7 +26,7 @@ const TEST_BOARD_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 /// * `queue` - The queue object which sent the request
 /// * `request` - The request object
 /// * `length` - Length of the data buffer associated with the request.
-pub fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
+pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("I/O read callback called");
 
     if length > TEST_BOARD_TRANSFER_BUFFER_SIZE {
@@ -38,12 +37,6 @@ pub fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize)
         request.complete_with_information(status_codes::STATUS_INVALID_PARAMETER.into(), 0);
         return;
     }
-
-    let Some(queue) = queue.upgrade() else {
-        println!("Queue cannot be upgraded to Arc");
-        request.complete(status_codes::STATUS_INVALID_DEVICE_STATE.into());
-        return;
-    };
 
     let device_context = DeviceContext::get(queue.get_device());
     let pipe = device_context.get_bulk_read_pipe();
@@ -88,7 +81,7 @@ pub fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize)
 /// * `target` - The I/O target to which the request was sent.
 fn evt_request_read_completion_routine(
     completion_token: RequestCompletionToken,
-    _target: &Opaque<IoTarget>,
+    _target: &IoTarget,
 ) {
     println!("Read completion routine called");
 
@@ -142,7 +135,7 @@ fn evt_request_read_completion_routine(
 /// * `queue`` - The queue object which sent the request
 /// * `request` - The request object
 /// * `length` - Length of the data buffer associated with the request.
-pub fn evt_io_write(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
+pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     println!("I/O write callback called");
 
     if length > TEST_BOARD_TRANSFER_BUFFER_SIZE {
@@ -153,12 +146,6 @@ pub fn evt_io_write(queue: &Opaque<IoQueue>, mut request: Request, length: usize
         request.complete_with_information(status_codes::STATUS_INVALID_PARAMETER.into(), 0);
         return;
     }
-
-    let Some(queue) = queue.upgrade() else {
-        println!("Queue cannot be upgraded to Arc");
-        request.complete(status_codes::STATUS_INVALID_DEVICE_STATE.into());
-        return;
-    };
 
     let device_context = DeviceContext::get(queue.get_device());
     let pipe = device_context.get_bulk_write_pipe();
@@ -199,7 +186,7 @@ pub fn evt_io_write(queue: &Opaque<IoQueue>, mut request: Request, length: usize
 /// * `target` - The I/O target to which the request was sent.
 fn evt_request_write_completion_routine(
     completion_token: RequestCompletionToken,
-    _target: &Opaque<IoTarget>,
+    _target: &IoTarget,
 ) {
     println!("Write completion routine called");
 
@@ -259,21 +246,12 @@ fn evt_request_write_completion_routine(
 /// * `request` - Request object
 /// * `action_flags` - Bitwise OR of one or more flags in
 ///   `RequestStopActionFlags`
-pub fn evt_io_stop(
-    queue: &Opaque<IoQueue>,
-    request_id: RequestId,
-    action_flags: RequestStopActionFlags,
-) {
+pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
     println!("I/O stop callback called");
 
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {
         Request::stop_acknowledge_no_requeue(request_id);
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
-        let Some(queue) = queue.upgrade() else {
-            println!("Queue cannot be upgraded to Arc");
-            return;
-        };
-
         let device_context = DeviceContext::get(queue.get_device());
 
         let cancellation_token = {
@@ -295,9 +273,7 @@ pub fn evt_io_stop(
 fn get_request(token: RequestCompletionToken) -> Option<Request> {
     let queue = token
         .get_io_queue()
-        .expect("Queue is available for this request")
-        .upgrade()
-        .expect("Queue must be upgradable to Arc");
+        .expect("Queue is available for this request");
 
     let device_context = DeviceContext::get(queue.get_device());
     device_context

@@ -25,7 +25,6 @@ use super::{
     memory::{Memory, OwnedMemory},
     object::{Handle, init_attributes},
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt, status_codes},
-    sync::Opaque,
 };
 use crate::usb::UsbRequestCompletionParams;
 
@@ -157,7 +156,7 @@ impl Request {
         Ok(())
     }
 
-    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
+    pub fn get_io_queue(&self) -> Option<&IoQueue> {
         unsafe { Self::get_io_queue_from_raw(self.0) }
     }
 
@@ -226,7 +225,7 @@ impl Request {
 
     pub fn set_completion_routine(
         &mut self,
-        completion_routine: fn(RequestCompletionToken, &Opaque<IoTarget>),
+        completion_routine: fn(RequestCompletionToken, &IoTarget),
     ) -> NtResult<()> {
         let context = self.get_context_mut_or_attach_new()?;
 
@@ -352,13 +351,13 @@ impl Request {
         })
     }
 
-    unsafe fn get_io_queue_from_raw<'a>(raw_request: WDFREQUEST) -> Option<&'a Opaque<IoQueue>> {
+    unsafe fn get_io_queue_from_raw<'a>(raw_request: WDFREQUEST) -> Option<&'a IoQueue> {
         unsafe {
             let queue = call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, raw_request);
             if queue.is_null() {
                 None
             } else {
-                Some(&*queue.cast::<Opaque<IoQueue>>())
+                Some(&*queue.cast::<IoQueue>())
             }
         }
     }
@@ -447,7 +446,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 #[object_context(Request)]
 struct RequestContext {
     evt_request_cancel: Option<fn(&RequestCancellationToken)>,
-    evt_request_completion_routine: Option<fn(RequestCompletionToken, &Opaque<IoTarget>)>,
+    evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
 }
 
 /// Macro that defines input and output memory contexts
@@ -537,7 +536,7 @@ pub extern "C" fn __evt_request_completion_routine(
     // `Request::get_completion_params` inside their callback.
     // That way params cannot outlive the request
     callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
-        &*(target.cast::<Opaque<IoTarget>>())
+        &*(target.cast::<IoTarget>())
     });
 }
 
@@ -735,7 +734,7 @@ impl RequestCancellationToken {
         self.0.id()
     }
 
-    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
+    pub fn get_io_queue(&self) -> Option<&IoQueue> {
         self.0.get_io_queue()
     }
 }
@@ -752,7 +751,7 @@ impl RequestCompletionToken {
         self.0.id()
     }
 
-    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
+    pub fn get_io_queue(&self) -> Option<&IoQueue> {
         self.0.get_io_queue()
     }
 }
@@ -778,7 +777,7 @@ impl SentRequestCancellationToken {
         RequestId(self.0 as usize)
     }
 
-    pub fn get_io_queue(&self) -> Option<&Opaque<IoQueue>> {
+    pub fn get_io_queue(&self) -> Option<&IoQueue> {
         unsafe { Request::get_io_queue_from_raw(self.0) }
     }
 }

@@ -500,11 +500,7 @@ fn select_interface(device: &Device) -> NtResult<()> {
     let device_ctxt = DeviceContext::get(device);
     let mut usb_device = device_ctxt.usb_device.lock();
 
-    let mut usb_device = usb_device
-        .as_mut()
-        .expect("USB device should be set")
-        .get_mut()
-        .expect("USB device should be mutable");
+    let usb_device = usb_device.as_mut().expect("USB device should be set");
 
     let interface_info = usb_device
         .select_config_single_interface()
@@ -581,13 +577,12 @@ fn select_interface(device: &Device) -> NtResult<()> {
 
     UsbDeviceContext::attach(&usb_device, context)?;
 
-    let Some(interface) = usb_device.get_interface_mut(0) else {
+    let Some(interface) = usb_device.get_interface(0) else {
         println!("Failed to get interface 0");
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };
 
-    let Some(interrupt_pipe) = interface.get_configured_pipe_mut(interrupt_pipe_index.unwrap())
-    else {
+    let Some(interrupt_pipe) = interface.get_configured_pipe(interrupt_pipe_index.unwrap()) else {
         println!("Failed to get interrupt pipe");
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };

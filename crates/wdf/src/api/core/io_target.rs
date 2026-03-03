@@ -1,4 +1,4 @@
-use core::{ptr, sync::atomic::AtomicIsize};
+use core::{ptr, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
@@ -44,7 +44,7 @@ impl IoTarget {
 
         if NT_SUCCESS(status) {
             let ctxt = IoTargetContext {
-                ref_count: AtomicIsize::new(0),
+                ref_count: AtomicUsize::new(0),
             };
 
             IoTargetContext::attach(unsafe { &*(io_target.cast()) }, ctxt)?;
@@ -326,7 +326,7 @@ pub enum RequestFormatMemory {
 
 #[object_context_with_ref_count_check(IoTarget)]
 struct IoTargetContext {
-    ref_count: AtomicIsize,
+    ref_count: AtomicUsize,
 }
 
 enum_mapping! {

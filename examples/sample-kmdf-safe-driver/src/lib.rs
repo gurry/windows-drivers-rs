@@ -38,7 +38,6 @@ use wdf::{
     IoQueueConfig,
     IoQueueDispatchType,
     NtResult,
-    Opaque,
     PnpPowerEventCallbacks,
     Request,
     RequestCancellationToken,
@@ -251,16 +250,10 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 ///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
-fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
+fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
 
-    let Some(queue) = queue.upgrade() else {
-        println!("Queue cannot be upgraded to Arc");
-        request.complete(status_codes::STATUS_INVALID_DEVICE_STATE.into());
-        return;
-    };
-
-    let context = QueueContext::get(&queue);
+    let context = QueueContext::get(queue);
     let memory = match request.retrieve_output_memory() {
         Ok(memory) => memory,
         Err(e) => {
@@ -332,7 +325,7 @@ fn evt_io_read(queue: &Opaque<IoQueue>, mut request: Request, length: usize) {
 ///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
-fn evt_io_write(queue: &Opaque<IoQueue>, request: Request, length: usize) {
+fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
 
     if length > MAX_WRITE_LENGTH {
@@ -358,13 +351,7 @@ fn evt_io_write(queue: &Opaque<IoQueue>, request: Request, length: usize) {
         return;
     }
 
-    let Some(queue) = queue.upgrade() else {
-        println!("Queue cannot be upgraded to Arc");
-        request.complete(status_codes::STATUS_INVALID_DEVICE_STATE.into());
-        return;
-    };
-
-    let context = QueueContext::get(&queue);
+    let context = QueueContext::get(queue);
 
     *context.buffer.lock() = Some(buffer);
 
@@ -399,11 +386,9 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 
     let queue = token
         .get_io_queue()
-        .expect("Queue must be available for this request")
-        .upgrade()
-        .expect("Queue must be upgradable to Arc");
+        .expect("Queue must be available for this request");
 
-    let context = QueueContext::get(&queue);
+    let context = QueueContext::get(queue);
 
     let mut req = context.request.lock();
     if let Some(req) = req.take() {
@@ -421,15 +406,10 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// # Arguments
 ///
 /// * `timer` - Handle of the timer that fired
-fn evt_timer(timer: &Opaque<Timer>) {
+fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
 
-    let Some(timer) = timer.upgrade() else {
-        println!("Timer cannot be upgraded to Arc");
-        return;
-    };
-
-    let queue = &TimerContext::get(&timer).queue;
+    let queue = &TimerContext::get(timer).queue;
 
     let req = QueueContext::get(queue).request.lock().take();
 
