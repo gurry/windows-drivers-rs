@@ -487,21 +487,15 @@ impl UsbPipe {
     }
 
     pub fn config_continuous_reader(&self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
-        if let Some(_ctxt) = UsbPipeContinuousReaderContext::try_get(self) {
-            // TODO: yet to implement this safely using interior mutability
-            // ctxt.read_complete_callback = config.read_complete_callback;
-            // ctxt.readers_failed_callback = config.readers_failed_callback;
-        } else {
-            let ctxt = UsbPipeContinuousReaderContext {
-                read_complete_callback: config.read_complete_callback,
-                readers_failed_callback: config.readers_failed_callback,
-            };
+        let read_complete_callback = config.read_complete_callback;
+        let readers_failed_callback = config.readers_failed_callback;
+        let mut config: WDF_USB_CONTINUOUS_READER_CONFIG = config.into();
 
-            UsbPipeContinuousReaderContext::attach(self, ctxt)?;
-        }
-
-        let mut config = config.into();
-
+        // WdfUsbTargetPipeConfigContinuousReader can only be called once per
+        // pipe. A second call returns STATUS_INVALID_DEVICE_STATE. Because of
+        // this, there is no need for synchronization with reader callbacks —
+        // they cannot fire until WdfIoTargetStart is called which can happen
+        // only after this after this function returns
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeConfigContinuousReader,
@@ -509,7 +503,18 @@ impl UsbPipe {
                 &mut config
             )
         }
-        .ok()
+        .and_then(|| {
+            // Context is attached only if the call to
+            // WdfUsbTargetPipeConfigContinuousReader succeeds
+            // which can happen only once
+            UsbPipeContinuousReaderContext::attach(
+                self,
+                UsbPipeContinuousReaderContext {
+                    read_complete_callback,
+                    readers_failed_callback,
+                },
+            )
+        })
     }
 
     pub fn format_request_for_read(
@@ -1150,16 +1155,14 @@ pub extern "C" fn __evt_usb_target_pipe_read_complete(
     _context: WDFCONTEXT,
 ) {
     let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
+    let ctxt = UsbPipeContinuousReaderContext::get(pipe);
 
-    if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get(pipe) {
-        if let Some(callback) = ctxt.read_complete_callback {
-            let buffer: &Memory = unsafe { &*(buffer.cast::<Memory>()) };
-            callback(pipe, buffer, num_bytes_transferred);
-            return;
-        }
+    if let Some(callback) = ctxt.read_complete_callback {
+        let buffer: &Memory = unsafe { &*(buffer.cast::<Memory>()) };
+        callback(pipe, buffer, num_bytes_transferred);
+    } else {
+        panic!("User did not provide callback read_complete_callback but we subscribed to it");
     }
-
-    panic!("User did not provide callback read_complete_callback but we subscribed to it");
 }
 
 pub extern "C" fn __evt_usb_target_pipe_readers_failed(
@@ -1168,15 +1171,14 @@ pub extern "C" fn __evt_usb_target_pipe_readers_failed(
     usbd_status: USBD_STATUS,
 ) -> BOOLEAN {
     let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
+    let ctxt = UsbPipeContinuousReaderContext::get(pipe);
 
-    if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get(pipe) {
-        if let Some(callback) = ctxt.readers_failed_callback {
-            let nt_status: NtStatus = status.into();
-            let usbd = UsbdStatus::new(usbd_status);
-            let result = callback(pipe, nt_status, usbd);
-            return if result { 1 } else { 0 };
-        }
+    if let Some(callback) = ctxt.readers_failed_callback {
+        let nt_status: NtStatus = status.into();
+        let usbd = UsbdStatus::new(usbd_status);
+        let result = callback(pipe, nt_status, usbd);
+        if result { 1 } else { 0 }
+    } else {
+        panic!("User did not provide callback readers_failed_callback but we subscribed to it");
     }
-
-    panic!("User did not provide callback readers_failed_callback but we subscribed to it");
 }
