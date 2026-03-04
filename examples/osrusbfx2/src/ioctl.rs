@@ -24,6 +24,8 @@ use wdf::{
         UsbBmRequestRecipient,
         UsbControlTransfer,
         UsbControlTransferMemoryDescriptor,
+        UsbInterface,
+        UsbPipeRef,
     },
 };
 
@@ -267,7 +269,7 @@ fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) 
 fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
     println!("Reset device");
 
-    stop_all_pipes(device_context);
+    stop_all_pipes(device_context)?;
 
     device_context
         .usb_device
@@ -499,50 +501,45 @@ fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
         .get_interface(0)
         .expect("USB interface 0 should be present");
 
-    interface
-        .get_configured_pipe(usb_device_context.interrupt_pipe_index)?
-        .expect("USB interrupt pipe should be present")
-        .get_io_target()
-        .start()?;
-    interface
-        .get_configured_pipe(usb_device_context.bulk_read_pipe_index)?
-        .expect("USB bulk read pipe should be present")
-        .get_io_target()
-        .start()?;
-    interface
-        .get_configured_pipe(usb_device_context.bulk_write_pipe_index)?
-        .expect("USB bulk write pipe should be present")
-        .get_io_target()
-        .start()?;
+    start_pipe(interface, usb_device_context.interrupt_pipe_index)?;
+    start_pipe(interface, usb_device_context.bulk_read_pipe_index)?;
+    start_pipe(interface, usb_device_context.bulk_write_pipe_index)?;
 
     Ok(())
 }
 
-fn stop_all_pipes(device_context: &DeviceContext) {
+fn stop_all_pipes(device_context: &DeviceContext) -> NtResult<()>  {
     let usb_device = device_context.get_usb_device();
     let usb_device_context = UsbDeviceContext::get(&usb_device);
     let interface = usb_device
         .get_interface(0)
         .expect("USB interface 0 should be present");
 
-    interface
-        .get_configured_pipe(usb_device_context.interrupt_pipe_index)
-        .expect("pipe guard should not be held exclusively")
-        .expect("USB interrupt pipe should be present")
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
-    interface
-        .get_configured_pipe(usb_device_context.bulk_read_pipe_index)
-        .expect("pipe guard should not be held exclusively")
-        .expect("USB bulk read pipe should be present")
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
-    interface
-        .get_configured_pipe(usb_device_context.bulk_write_pipe_index)
-        .expect("pipe guard should not be held exclusively")
-        .expect("USB bulk write pipe should be present")
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
+    stop_pipe(interface, usb_device_context.interrupt_pipe_index)?;
+    stop_pipe(interface, usb_device_context.bulk_read_pipe_index)?;
+    stop_pipe(interface, usb_device_context.bulk_write_pipe_index)?;
+
+    Ok(())
+}
+
+fn get_pipe(interface: &UsbInterface, pipe_index: u8) -> NtResult<UsbPipeRef<'_>> {
+    let pipe = interface
+        .get_configured_pipe(pipe_index)?
+        .expect("USB pipe should be present");
+
+    Ok(pipe)
+}
+
+fn start_pipe(interface: &UsbInterface, pipe_index: u8) -> NtResult<()> {
+    let pipe = get_pipe(interface, pipe_index)?;
+    pipe.get_io_target().start()
+}
+
+fn stop_pipe(interface: &UsbInterface, pipe_index: u8) -> NtResult<()> {
+    let pipe = get_pipe(interface, pipe_index)?;
+    pipe.get_io_target().stop(IoTargetSentIoAction::CancelSentIo);
+
+    Ok(())
 }
 
 fn send_vendor_command(
