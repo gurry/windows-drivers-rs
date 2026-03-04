@@ -15,7 +15,7 @@ use wdf::{
     usb::UsbRequestCompletionParamDetails,
 };
 
-use crate::DeviceContext;
+use crate::{DeviceContext, UsbDeviceContext};
 
 const TEST_BOARD_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -39,7 +39,15 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     }
 
     let device_context = DeviceContext::get(queue.get_device());
-    let pipe = device_context.get_bulk_read_pipe();
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+    let pipe = interface
+        .get_configured_pipe(usb_device_context.bulk_read_pipe_index)
+        .expect("pipe guard should not be held exclusively")
+        .expect("USB bulk read pipe should be present");
 
     // The format call validates to make sure that you are reading or
     // writing to the right pipe type, sets the appropriate transfer flags,
@@ -148,7 +156,15 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     }
 
     let device_context = DeviceContext::get(queue.get_device());
-    let pipe = device_context.get_bulk_write_pipe();
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+    let pipe = interface
+        .get_configured_pipe(usb_device_context.bulk_write_pipe_index)
+        .expect("pipe guard should not be held exclusively")
+        .expect("USB bulk write pipe should be present");
 
     if let Err(e) =
         pipe.format_request_for_write(&mut request, RequestFormatMemory::RequestMemory(None))

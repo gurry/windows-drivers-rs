@@ -1,4 +1,4 @@
-use core::{mem, ptr, sync::atomic::AtomicUsize};
+use core::{mem, ops::Deref, ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
@@ -50,7 +50,7 @@ use super::core::{
     object::{Handle, impl_handle, impl_ref_counted_handle},
     request::Request,
     result::{NtResult, NtStatus, StatusCodeExt, status_codes},
-    sync::Arc,
+    sync::{Arc, AtomicRef, AtomicRefCell},
 };
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
@@ -72,11 +72,28 @@ impl UsbDevice {
         .and_then(|| {
             let ctxt = UsbDeviceContext {
                 ref_count: AtomicUsize::new(0),
+                pipe_guard: AtomicRefCell::new(()),
             };
 
-            UsbDeviceContext::attach(unsafe { &*(usb_device.cast()) }, ctxt)?;
-            let usb_device = unsafe { Arc::from_raw(usb_device.cast()) };
+            let usb_device_ref = unsafe { &*(usb_device.cast::<UsbDevice>()) };
+            UsbDeviceContext::attach(usb_device_ref, ctxt)?;
 
+            // Attach UsbInterfaceContext to every interface so we can
+            // navigate back to the parent UsbDevice from any interface.
+            for i in 0..u8::MAX {
+                let Some(interface) = usb_device_ref.get_interface(i) else {
+                    break;
+                };
+
+                UsbInterfaceContext::attach(
+                    interface,
+                    UsbInterfaceContext {
+                        device_handle: usb_device,
+                    },
+                )?;
+            }
+
+            let usb_device = unsafe { Arc::from_raw(usb_device.cast()) };
             Ok(usb_device)
         })
     }
@@ -120,6 +137,11 @@ impl UsbDevice {
     }
 
     pub fn select_config_single_interface(&self) -> NtResult<UsbSingleInterfaceInformation<'_>> {
+        let device_context = UsbDeviceContext::get(self);
+        let Some(_exclusive) = device_context.pipe_guard.borrow_mut() else {
+            return Err(status_codes::STATUS_DEVICE_BUSY.into());
+        };
+
         let mut config = init_wdf_struct!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
             _WdfUsbTargetDeviceSelectConfigType::WdfUsbTargetDeviceSelectConfigTypeSingleInterface;
@@ -208,6 +230,24 @@ impl UsbDevice {
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
     ref_count: AtomicUsize,
+    pipe_guard: AtomicRefCell<()>,
+}
+
+#[object_context(UsbInterface)]
+struct UsbInterfaceContext {
+    device_handle: WDFUSBDEVICE,
+}
+
+// SAFETY: WDFUSBDEVICE is a WDF handle that is
+// valid for the lifetime of the USB interface object.
+// It is safe to share across threads.
+unsafe impl Sync for UsbInterfaceContext {}
+
+impl UsbInterfaceContext {
+    fn get_device_context(&self) -> &UsbDeviceContext {
+        let usb_device = unsafe { &*(self.device_handle.cast::<UsbDevice>()) };
+        UsbDeviceContext::get(usb_device)
+    }
 }
 
 pub struct UsbDeviceCreateConfig {
@@ -268,26 +308,67 @@ pub struct UsbSingleInterfaceInformation<'a> {
 
 impl_handle!(UsbInterface);
 
+/// RAII guard that holds a shared borrow on the parent device's
+/// pipe_guard. While any `UsbPipeRef` exists,
+/// `select_setting` and `select_config_single_interface` cannot
+/// acquire their exclusive borrow and will return an error,
+/// preventing pipe destruction.
+pub struct UsbPipeRef<'a> {
+    _borrow: AtomicRef<'a, ()>,
+    pipe: &'a UsbPipe,
+}
+
+impl Deref for UsbPipeRef<'_> {
+    type Target = UsbPipe;
+
+    fn deref(&self) -> &Self::Target {
+        self.pipe
+    }
+}
+
 impl UsbInterface {
-    pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
-        self.get_configured_pipe_impl(pipe_index, false)
-            .map(|(pipe, _)| unsafe { &*(pipe.cast::<UsbPipe>()) })
+    pub fn get_configured_pipe(&self, pipe_index: u8) -> NtResult<Option<UsbPipeRef<'_>>> {
+        let device_context = UsbInterfaceContext::get(self).get_device_context();
+        let Some(borrow) = device_context.pipe_guard.borrow() else {
+            return Err(status_codes::STATUS_DEVICE_BUSY.into());
+        };
+
+        Ok(self
+            .get_configured_pipe_impl(pipe_index, false)
+            .map(|(pipe, _)| UsbPipeRef {
+                _borrow: borrow,
+                pipe: unsafe { &*pipe },
+            }))
     }
 
-    pub fn get_configured_pipe_with_information<'a>(
+    pub fn get_configured_pipe_with_information(
         &self,
         pipe_index: u8,
-    ) -> Option<(&'a UsbPipe, UsbPipeInformation)> {
-        self.get_configured_pipe_impl(pipe_index, true)
+    ) -> NtResult<Option<(UsbPipeRef<'_>, UsbPipeInformation)>> {
+        let device_context = UsbInterfaceContext::get(self).get_device_context();
+        let Some(borrow) = device_context.pipe_guard.borrow() else {
+            return Err(status_codes::STATUS_DEVICE_BUSY.into());
+        };
+
+        Ok(self
+            .get_configured_pipe_impl(pipe_index, true)
             .map(|(pipe, info)| {
                 (
-                    unsafe { &*(pipe.cast::<UsbPipe>()) },
+                    UsbPipeRef {
+                        _borrow: borrow,
+                        pipe: unsafe { &*pipe },
+                    },
                     info.expect("framework should return pipe information if pipe exists"),
                 )
-            })
+            }))
     }
 
     pub fn select_setting(&self, params: &UsbInterfaceSelectSettingParams) -> NtResult<()> {
+        let device_context = UsbInterfaceContext::get(self).get_device_context();
+        let Some(_exclusive) = device_context.pipe_guard.borrow_mut() else {
+            return Err(status_codes::STATUS_DEVICE_BUSY.into());
+        };
+
         let mut raw_params = init_wdf_struct!(WDF_USB_INTERFACE_SELECT_SETTING_PARAMS);
         let mut raw_descriptor: USB_INTERFACE_DESCRIPTOR;
 

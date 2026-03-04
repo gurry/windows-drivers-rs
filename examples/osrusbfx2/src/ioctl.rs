@@ -27,7 +27,7 @@ use wdf::{
     },
 };
 
-use crate::DeviceContext;
+use crate::{DeviceContext, UsbDeviceContext};
 
 const IOCTL_INDEX: u32 = 0x800;
 const FILE_DEVICE_OSRUSBFX2: u32 = 65500;
@@ -493,16 +493,25 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
 }
 
 fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
-    device_context
-        .get_interrupt_pipe()
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+
+    interface
+        .get_configured_pipe(usb_device_context.interrupt_pipe_index)?
+        .expect("USB interrupt pipe should be present")
         .get_io_target()
         .start()?;
-    device_context
-        .get_bulk_read_pipe()
+    interface
+        .get_configured_pipe(usb_device_context.bulk_read_pipe_index)?
+        .expect("USB bulk read pipe should be present")
         .get_io_target()
         .start()?;
-    device_context
-        .get_bulk_write_pipe()
+    interface
+        .get_configured_pipe(usb_device_context.bulk_write_pipe_index)?
+        .expect("USB bulk write pipe should be present")
         .get_io_target()
         .start()?;
 
@@ -510,16 +519,28 @@ fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
 }
 
 fn stop_all_pipes(device_context: &DeviceContext) {
-    device_context
-        .get_interrupt_pipe()
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+
+    interface
+        .get_configured_pipe(usb_device_context.interrupt_pipe_index)
+        .expect("pipe guard should not be held exclusively")
+        .expect("USB interrupt pipe should be present")
         .get_io_target()
         .stop(IoTargetSentIoAction::CancelSentIo);
-    device_context
-        .get_bulk_read_pipe()
+    interface
+        .get_configured_pipe(usb_device_context.bulk_read_pipe_index)
+        .expect("pipe guard should not be held exclusively")
+        .expect("USB bulk read pipe should be present")
         .get_io_target()
         .stop(IoTargetSentIoAction::CancelSentIo);
-    device_context
-        .get_bulk_write_pipe()
+    interface
+        .get_configured_pipe(usb_device_context.bulk_write_pipe_index)
+        .expect("pipe guard should not be held exclusively")
+        .expect("USB bulk write pipe should be present")
         .get_io_target()
         .stop(IoTargetSentIoAction::CancelSentIo);
 }

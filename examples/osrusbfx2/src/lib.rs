@@ -21,7 +21,6 @@ use wdf::{
     IoQueue,
     IoQueueConfig,
     IoQueueDispatchType,
-    IoTarget,
     IoTargetSentIoAction,
     IoTypeConfig,
     NtResult,
@@ -39,7 +38,7 @@ use wdf::{
     object_context,
     println,
     status_codes,
-    usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipe, UsbPipeType},
+    usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
 };
 
 mod bulkrwr;
@@ -74,16 +73,12 @@ struct DeviceContext {
 }
 
 impl DeviceContext {
-    fn get_interrupt_pipe(&self) -> &UsbPipe {
-        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.interrupt_pipe_index)
-    }
-
-    fn get_bulk_read_pipe(&self) -> &UsbPipe {
-        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_read_pipe_index)
-    }
-
-    fn get_bulk_write_pipe(&self) -> &UsbPipe {
-        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_write_pipe_index)
+    fn get_usb_device(&self) -> Arc<UsbDevice> {
+        let usb_device = self.usb_device.lock();
+        usb_device
+            .as_ref()
+            .expect("USB device should be set")
+            .clone()
     }
 
     fn add_sent_request(&self, sent_request: SentRequest) {
@@ -98,18 +93,6 @@ impl DeviceContext {
         } else {
             None
         }
-    }
-
-    fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
-        let usb_device = self.usb_device.lock();
-        let usb_device = usb_device.as_ref().expect("USB device should be set");
-        let usb_device_context = UsbDeviceContext::get(&usb_device);
-        let usb_interface = usb_device
-            .get_interface(0)
-            .expect("USB interface 0 should be present");
-        usb_interface
-            .get_configured_pipe(pipe_index(usb_device_context))
-            .expect("USB pipe should be present")
     }
 }
 
@@ -422,7 +405,17 @@ fn evt_device_prepare_hardware(
 /// recently. If the device is being newly started, this will be `Unspecified`
 fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 entry callback called");
-    let io_target = get_interrupt_io_target(device);
+
+    let device_context = DeviceContext::get(device);
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+    let interrupt_pipe = interface
+        .get_configured_pipe(usb_device_context.interrupt_pipe_index)?
+        .expect("USB interrupt pipe should be present");
+    let io_target = interrupt_pipe.get_io_target();
 
     if let Err(e) = io_target.start() {
         println!("Failed to start IO target: {:?}", e);
@@ -464,16 +457,20 @@ fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> Nt
 fn evt_device_d0_exit(device: &Device, _target_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 exit callback called");
 
-    let io_target = get_interrupt_io_target(device);
-    io_target.stop(IoTargetSentIoAction::CancelSentIo);
+    let device_context = DeviceContext::get(device);
+    let usb_device = device_context.get_usb_device();
+    let usb_device_context = UsbDeviceContext::get(&usb_device);
+    let interface = usb_device
+        .get_interface(0)
+        .expect("USB interface 0 should be present");
+    let interrupt_pipe = interface
+        .get_configured_pipe(usb_device_context.interrupt_pipe_index)?
+        .expect("USB interrupt pipe should be present");
+    interrupt_pipe
+        .get_io_target()
+        .stop(IoTargetSentIoAction::CancelSentIo);
 
     Ok(())
-}
-
-fn get_interrupt_io_target(device: &Device) -> &IoTarget {
-    let device_context = DeviceContext::get(device);
-    let interrupt_pipe = device_context.get_interrupt_pipe();
-    interrupt_pipe.get_io_target()
 }
 
 fn evt_device_self_managed_io_flush(device: &Device) {
@@ -531,7 +528,7 @@ fn select_interface(device: &Device) -> NtResult<()> {
     for i in 0..interface_info.number_of_configured_pipes {
         let Some((pipe, pipe_info)) = interface_info
             .configured_usb_interface
-            .get_configured_pipe_with_information(i)
+            .get_configured_pipe_with_information(i)?
         else {
             println!("Failed to get pipe information for pipe index {}", i);
             return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
@@ -582,12 +579,12 @@ fn select_interface(device: &Device) -> NtResult<()> {
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };
 
-    let Some(interrupt_pipe) = interface.get_configured_pipe(interrupt_pipe_index.unwrap()) else {
+    let Some(interrupt_pipe) = interface.get_configured_pipe(interrupt_pipe_index.unwrap())? else {
         println!("Failed to get interrupt pipe");
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };
 
-    cont_reader_for_interrupt_endpoint(interrupt_pipe)?;
+    cont_reader_for_interrupt_endpoint(&interrupt_pipe)?;
 
     Ok(())
 }
