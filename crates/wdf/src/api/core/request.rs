@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::string::String;
 use core::{mem::ManuallyDrop, ptr, slice};
 
 use bitflags::bitflags;
@@ -437,42 +437,6 @@ impl Drop for Request {
             }
         } else {
             Self::complete_impl(self.0, status_codes::STATUS_UNSUCCESSFUL.into());
-        }
-    }
-}
-
-pub trait CancellableRequestStore {
-    fn add(&mut self, request: CancellableRequest);
-    fn take(&mut self, id: RequestId) -> Option<CancellableRequest>;
-}
-
-impl CancellableRequestStore for Option<CancellableRequest> {
-    fn add(&mut self, request: CancellableRequest) {
-        *self = Some(request);
-    }
-
-    fn take(&mut self, id: RequestId) -> Option<CancellableRequest> {
-        if let Some(request) = self.take() {
-            if request.id() == id {
-                return Some(request);
-            } else {
-                *self = Some(request);
-            }
-        }
-        None
-    }
-}
-
-impl CancellableRequestStore for Vec<CancellableRequest> {
-    fn add(&mut self, request: CancellableRequest) {
-        self.push(request);
-    }
-
-    fn take(&mut self, id: RequestId) -> Option<CancellableRequest> {
-        if let Some(position) = self.iter().position(|r| r.id() == id) {
-            Some(self.remove(position))
-        } else {
-            None
         }
     }
 }
