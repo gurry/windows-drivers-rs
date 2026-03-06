@@ -20,6 +20,7 @@ use wdk_sys::{
 use super::{
     enum_mapping,
     init_wdf_struct,
+    device::Device,
     io_queue::IoQueue,
     io_target::IoTarget,
     memory::{Memory, OwnedMemory},
@@ -46,10 +47,11 @@ impl Request {
     /// The optional `io_target` parameter specifies the default
     /// I/O target for the request. If `None`, the request is not
     /// associated with any I/O target.
-    pub fn create(io_target: Option<&IoTarget>) -> NtResult<Self> {
+    pub fn create(parent: &Device, io_target: Option<&IoTarget>) -> NtResult<Self> {
         let mut request: WDFREQUEST = ptr::null_mut();
         let io_target_ptr = io_target.map_or(ptr::null_mut(), |t| t.as_ptr().cast());
         let mut attributes = init_attributes();
+        attributes.ParentObject = parent.as_ptr();
 
         unsafe {
             call_unsafe_wdf_function_binding!(

@@ -15,7 +15,8 @@ use wdk_sys::{
 };
 
 use super::{
-    object::{Handle, impl_handle},
+    device::Device,
+    object::{Handle, impl_handle, init_attributes},
     result::{NtResult, StatusCodeExt},
 };
 
@@ -95,17 +96,19 @@ impl Memory {
 pub struct OwnedMemory(WDFMEMORY);
 
 impl OwnedMemory {
-    pub fn create(pool_type: PoolType, pool_tag: u32, buffer_size: usize) -> NtResult<Self> {
+    pub fn create(parent: &Device, pool_type: PoolType, pool_tag: u32, buffer_size: usize) -> NtResult<Self> {
         let pool_type = match pool_type {
             PoolType::Paged => _POOL_TYPE::PagedPool,
             PoolType::NonPagedNx => _POOL_TYPE::NonPagedPoolNx,
         };
 
+        let mut attributes = init_attributes();
+        attributes.ParentObject = parent.as_ptr();
         let mut memory: WDFMEMORY = ptr::null_mut();
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCreate,
-                ptr::null_mut(),
+                &mut attributes,
                 pool_type,
                 pool_tag,
                 buffer_size,
