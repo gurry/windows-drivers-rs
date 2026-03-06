@@ -43,13 +43,8 @@ impl Request {
     }
 
     /// Creates a new WDF request object.
-    ///
-    /// The optional `io_target` parameter specifies the default
-    /// I/O target for the request. If `None`, the request is not
-    /// associated with any I/O target.
-    pub fn create(parent: &Device, io_target: Option<&IoTarget>) -> NtResult<Self> {
+    pub fn create(parent: &Device) -> NtResult<Self> {
         let mut request: WDFREQUEST = ptr::null_mut();
-        let io_target_ptr = io_target.map_or(ptr::null_mut(), |t| t.as_ptr().cast());
         let mut attributes = init_attributes();
         attributes.ParentObject = parent.as_ptr();
 
@@ -57,7 +52,7 @@ impl Request {
             call_unsafe_wdf_function_binding!(
                 WdfRequestCreate,
                 &mut attributes,
-                io_target_ptr,
+                ptr::null_mut(),
                 &mut request,
             )
         }
