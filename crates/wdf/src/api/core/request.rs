@@ -1,5 +1,5 @@
 use alloc::{string::String, vec::Vec};
-use core::{ptr, slice};
+use core::{mem::ManuallyDrop, ptr, slice};
 
 use bitflags::bitflags;
 use wdf_macros::object_context;
@@ -67,20 +67,24 @@ impl Request {
     }
 
     pub fn complete(self, status: NtStatus) {
+        // Suppress Drop to prevent completion or deletion
+        let request = ManuallyDrop::new(self);
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestComplete,
-                self.as_ptr().cast(),
+                request.as_ptr().cast(),
                 status.code()
             )
         };
     }
 
     pub fn complete_with_information(self, status: NtStatus, information: usize) {
+        // Suppress Drop to prevent completion or deletion
+        let request = ManuallyDrop::new(self);
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestCompleteWithInformation,
-                self.as_ptr().cast(),
+                request.as_ptr().cast(),
                 status.code(),
                 information as core::ffi::c_ulonglong
             )
@@ -257,7 +261,7 @@ impl Request {
         };
 
         if res != 0 {
-            Ok(SentRequest(self))
+            Ok(SentRequest(ManuallyDrop::new(self)))
         } else {
             Err(self)
         }
@@ -296,8 +300,10 @@ impl Request {
     }
 
     pub fn stop_acknowledge_requeue(self) {
+        // Suppress Drop to prevent completion or deletion
+        let request = ManuallyDrop::new(self);
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr().cast(), 1);
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, request.as_ptr().cast(), 1);
         }
     }
 
@@ -508,8 +514,8 @@ define_user_memory_context!(input);
 define_user_memory_context!(output);
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
-    let safe_request = unsafe { &Request::from_raw(request as _) };
-    let context = RequestContext::get(safe_request);
+    let safe_req = ManuallyDrop::new(unsafe { Request::from_raw(request as _) });
+    let context = RequestContext::get(&safe_req);
     let Some(evt_request_cancel) = context.evt_request_cancel else {
         panic!("Request cancellation callback called but no user callback set");
     };
@@ -523,7 +529,7 @@ pub extern "C" fn __evt_request_completion_routine(
     _params: *mut WDF_REQUEST_COMPLETION_PARAMS,
     _context: WDFCONTEXT,
 ) {
-    let safe_req = unsafe { Request::from_raw(request as _) };
+    let safe_req = ManuallyDrop::new(unsafe { Request::from_raw(request as _) });
     let context = RequestContext::get(&safe_req);
     let Some(callback) = context.evt_request_completion_routine else {
         panic!("Request's completion routine called but not user callback was set");
@@ -694,7 +700,7 @@ impl Handle for CancellableRequest {
 
 /// A request that has been sent to an I/O target.
 #[derive(Debug)]
-pub struct SentRequest(Request);
+pub struct SentRequest(ManuallyDrop<Request>);
 
 impl SentRequest {
     pub fn id(&self) -> RequestId {
@@ -703,8 +709,8 @@ impl SentRequest {
 
     pub fn into_request(self, _token: RequestCompletionToken) -> Request {
         // _token is required only to ensure that
-        // caller is calling this from or evt_request_completion_routine
-        self.0
+        // caller is calling this from evt_request_completion_routine.
+        ManuallyDrop::into_inner(self.0)
     }
 
     pub fn get_cancellation_token(&self) -> SentRequestCancellationToken {
@@ -723,11 +729,11 @@ impl Handle for SentRequest {
 }
 
 #[derive(Debug)]
-pub struct RequestCancellationToken(Request);
+pub struct RequestCancellationToken(ManuallyDrop<Request>);
 
 impl RequestCancellationToken {
     unsafe fn new(inner: WDFREQUEST) -> Self {
-        Self(unsafe { Request::from_raw(inner) })
+        Self(ManuallyDrop::new(unsafe { Request::from_raw(inner) }))
     }
 
     pub fn request_id(&self) -> RequestId {
