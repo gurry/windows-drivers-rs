@@ -59,7 +59,18 @@ impl Request {
                 &mut request,
             )
         }
-        .map(|| unsafe { Self::from_raw(request) })
+        .and_then(|| {
+            let req = unsafe { Self::from_raw(request) };
+            RequestContext::attach(
+                &req,
+                RequestContext {
+                    should_delete: true,
+                    evt_request_cancel: None,
+                    evt_request_completion_routine: None,
+                },
+            )?;
+            Ok(req)
+        })
     }
 
     pub fn id(&self) -> RequestId {
@@ -69,10 +80,14 @@ impl Request {
     pub fn complete(self, status: NtStatus) {
         // Suppress Drop to prevent completion or deletion
         let request = ManuallyDrop::new(self);
+        Self::complete_impl(request.0, status);
+    }
+
+    fn complete_impl(request: WDFREQUEST, status: NtStatus) {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestComplete,
-                request.as_ptr().cast(),
+                request.cast(),
                 status.code()
             )
         };
@@ -155,7 +170,7 @@ impl Request {
         &mut self,
         cancel_fn: Option<fn(&RequestCancellationToken)>,
     ) -> NtResult<()> {
-        let context = self.get_context_mut_or_attach_new()?;
+        let context = self.get_context_mut_or_attach_new(false)?;
         context.evt_request_cancel = cancel_fn;
         Ok(())
     }
@@ -231,7 +246,7 @@ impl Request {
         &mut self,
         completion_routine: fn(RequestCompletionToken, &IoTarget),
     ) -> NtResult<()> {
-        let context = self.get_context_mut_or_attach_new()?;
+        let context = self.get_context_mut_or_attach_new(false)?;
 
         context.evt_request_completion_routine = Some(completion_routine);
         unsafe {
@@ -368,11 +383,12 @@ impl Request {
         }
     }
 
-    fn get_context_mut_or_attach_new(&mut self) -> NtResult<&mut RequestContext> {
+    fn get_context_mut_or_attach_new(&mut self, should_delete: bool) -> NtResult<&mut RequestContext> {
         if RequestContext::try_get_mut(self).is_none() {
             RequestContext::attach(
                 self,
                 RequestContext {
+                    should_delete,
                     evt_request_cancel: None,
                     evt_request_completion_routine: None,
                 },
@@ -413,6 +429,18 @@ unsafe impl Sync for Request {}
 /// pointer
 unsafe impl Send for Request {}
 
+impl Drop for Request {
+    fn drop(&mut self) {
+        if RequestContext::try_get(self).map_or(false, |ctx| ctx.should_delete) {
+            unsafe {
+                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr());
+            }
+        } else {
+            Self::complete_impl(self.0, status_codes::STATUS_UNSUCCESSFUL.into());
+        }
+    }
+}
+
 pub trait CancellableRequestStore {
     fn add(&mut self, request: CancellableRequest);
     fn take(&mut self, id: RequestId) -> Option<CancellableRequest>;
@@ -451,6 +479,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 
 #[object_context(Request)]
 struct RequestContext {
+    should_delete: bool,
     evt_request_cancel: Option<fn(&RequestCancellationToken)>,
     evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
 }
