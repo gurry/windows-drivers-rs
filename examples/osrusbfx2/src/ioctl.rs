@@ -508,7 +508,7 @@ fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
     Ok(())
 }
 
-fn stop_all_pipes(device_context: &DeviceContext) -> NtResult<()>  {
+fn stop_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
     let usb_device = device_context.get_usb_device();
     let usb_device_context = UsbDeviceContext::get(&usb_device);
     let interface = usb_device
@@ -537,7 +537,8 @@ fn start_pipe(interface: &UsbInterface, pipe_index: u8) -> NtResult<()> {
 
 fn stop_pipe(interface: &UsbInterface, pipe_index: u8) -> NtResult<()> {
     let pipe = get_pipe(interface, pipe_index)?;
-    pipe.get_io_target().stop(IoTargetSentIoAction::CancelSentIo);
+    pipe.get_io_target()
+        .stop(IoTargetSentIoAction::CancelSentIo);
 
     Ok(())
 }

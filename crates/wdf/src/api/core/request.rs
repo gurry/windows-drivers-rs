@@ -18,9 +18,9 @@ use wdk_sys::{
 };
 
 use super::{
+    device::Device,
     enum_mapping,
     init_wdf_struct,
-    device::Device,
     io_queue::IoQueue,
     io_target::IoTarget,
     memory::{Memory, OwnedMemory},
@@ -82,11 +82,7 @@ impl Request {
 
     fn complete_impl(request: WDFREQUEST, status: NtStatus) {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestComplete,
-                request.cast(),
-                status.code()
-            )
+            call_unsafe_wdf_function_binding!(WdfRequestComplete, request.cast(), status.code())
         };
     }
 
@@ -315,7 +311,11 @@ impl Request {
         // Suppress Drop to prevent completion or deletion
         let request = ManuallyDrop::new(self);
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, request.as_ptr().cast(), 1);
+            call_unsafe_wdf_function_binding!(
+                WdfRequestStopAcknowledge,
+                request.as_ptr().cast(),
+                1
+            );
         }
     }
 
@@ -380,7 +380,10 @@ impl Request {
         }
     }
 
-    fn get_context_mut_or_attach_new(&mut self, should_delete: bool) -> NtResult<&mut RequestContext> {
+    fn get_context_mut_or_attach_new(
+        &mut self,
+        should_delete: bool,
+    ) -> NtResult<&mut RequestContext> {
         if RequestContext::try_get_mut(self).is_none() {
             RequestContext::attach(
                 self,
