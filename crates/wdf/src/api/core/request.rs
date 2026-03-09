@@ -238,7 +238,7 @@ impl Request {
 
     pub fn set_completion_routine(
         &mut self,
-        completion_routine: fn(RequestCompletionToken, &IoTarget),
+        completion_routine: fn(Request, &IoTarget),
     ) -> NtResult<()> {
         let context = self.get_context_mut_or_attach_new(false)?;
 
@@ -259,7 +259,7 @@ impl Request {
         Ok(())
     }
 
-    pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<SentRequest, Request> {
+    pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<(), Request> {
         let res = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestSend,
@@ -270,7 +270,8 @@ impl Request {
         };
 
         if res != 0 {
-            Ok(SentRequest(ManuallyDrop::new(self)))
+            core::mem::forget(self); // Suppress drop which could complete or delete the request
+            Ok(())
         } else {
             Err(self)
         }
@@ -330,11 +331,19 @@ impl Request {
         }
     }
 
-    pub fn cancel_sent_request(token: &SentRequestCancellationToken) -> bool {
+    pub fn cancel_sent_request(token: SentRequestCancellationToken) -> bool {
         let res =
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, token.0) };
 
         res != 0
+    }
+
+    /// Gets a token that can be used to cancel this request after it has been
+    /// sent to an I/O target. The token keeps the underlying WDFREQUEST alive
+    /// via WdfObjectReference.
+    /// Call this before send_asynchronously if you need cancellation support.
+    pub fn get_sent_request_cancellation_token(&self) -> SentRequestCancellationToken {
+        unsafe { SentRequestCancellationToken::new(self.0) }
     }
 
     /// Reuses a previously created request object so it can be
@@ -446,7 +455,7 @@ impl Drop for Request {
 struct RequestContext {
     should_delete: bool,
     evt_request_cancel: Option<fn(&RequestCancellationToken)>,
-    evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
+    evt_request_completion_routine: Option<fn(Request, &IoTarget)>,
 }
 
 /// Macro that defines input and output memory contexts
@@ -535,7 +544,7 @@ pub extern "C" fn __evt_request_completion_routine(
     // allowed to get access to params only by calling
     // `Request::get_completion_params` inside their callback.
     // That way params cannot outlive the request
-    callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
+    callback(unsafe { Request::from_raw(request) }, unsafe {
         &*(target.cast::<IoTarget>())
     });
 }
@@ -692,59 +701,12 @@ impl Handle for CancellableRequest {
     }
 }
 
-/// A request that has been sent to an I/O target.
-#[derive(Debug)]
-pub struct SentRequest(ManuallyDrop<Request>);
-
-impl SentRequest {
-    pub fn id(&self) -> RequestId {
-        self.0.id()
-    }
-
-    pub fn into_request(self, _token: RequestCompletionToken) -> Request {
-        // _token is required only to ensure that
-        // caller is calling this from evt_request_completion_routine.
-        ManuallyDrop::into_inner(self.0)
-    }
-
-    pub fn get_cancellation_token(&self) -> SentRequestCancellationToken {
-        unsafe { SentRequestCancellationToken::new(self.0.as_ptr().cast()) }
-    }
-}
-
-impl Handle for SentRequest {
-    fn as_ptr(&self) -> WDFOBJECT {
-        self.0.as_ptr()
-    }
-
-    fn type_name() -> String {
-        String::from("SentRequest")
-    }
-}
-
 #[derive(Debug)]
 pub struct RequestCancellationToken(ManuallyDrop<Request>);
 
 impl RequestCancellationToken {
     unsafe fn new(inner: WDFREQUEST) -> Self {
         Self(ManuallyDrop::new(unsafe { Request::from_raw(inner) }))
-    }
-
-    pub fn request_id(&self) -> RequestId {
-        self.0.id()
-    }
-
-    pub fn get_io_queue(&self) -> Option<&IoQueue> {
-        self.0.get_io_queue()
-    }
-}
-
-#[derive(Debug)]
-pub struct RequestCompletionToken(Request);
-
-impl RequestCompletionToken {
-    unsafe fn new(inner: WDFREQUEST) -> Self {
-        Self(unsafe { Request::from_raw(inner) })
     }
 
     pub fn request_id(&self) -> RequestId {
@@ -776,10 +738,6 @@ impl SentRequestCancellationToken {
     pub fn request_id(&self) -> RequestId {
         RequestId(self.0 as usize)
     }
-
-    pub fn get_io_queue(&self) -> Option<&IoQueue> {
-        unsafe { Request::get_io_queue_from_raw(self.0) }
-    }
 }
 
 impl Drop for SentRequestCancellationToken {
@@ -795,6 +753,14 @@ impl Drop for SentRequestCancellationToken {
         }
     }
 }
+
+// SentRequestCancellationToken is Sync because the underlying
+// WDFREQUEST is thread-safe
+unsafe impl Sync for SentRequestCancellationToken {}
+
+// SentRequestCancellationToken is Send because the underlying
+// WDFREQUEST is thread-safe and is uniquely owned by the token
+unsafe impl Send for SentRequestCancellationToken {}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

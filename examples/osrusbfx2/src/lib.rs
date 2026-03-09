@@ -30,7 +30,7 @@ use wdf::{
     PowerPolicyS0IdleCapabilities,
     RequestId,
     RequestType,
-    SentRequest,
+    SentRequestCancellationToken,
     SpinLock,
     TriState,
     UnicodeString,
@@ -63,7 +63,8 @@ struct DeviceContext {
     usb_device: SpinLock<Option<Arc<UsbDevice>>>,
     usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
-    sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
+    sent_requests: SpinLock<Vec<SentRequestCancellationToken>>, /* TODO: change to HashMap when
+                                                                 * available */
     interrupt_msg_queue: Arc<IoQueue>,
     // Below three variables are never used.
     // They're placed here only to keep the queues alive
@@ -81,14 +82,20 @@ impl DeviceContext {
             .clone()
     }
 
-    fn add_sent_request(&self, sent_request: SentRequest) {
+    fn add_cancellation_token(&self, token: SentRequestCancellationToken) {
         let mut sent_requests = self.sent_requests.lock();
-        sent_requests.push(sent_request);
+        sent_requests.push(token);
     }
 
-    fn get_sent_request(&self, request_id: RequestId) -> Option<SentRequest> {
+    fn take_cancellation_token(
+        &self,
+        request_id: RequestId,
+    ) -> Option<SentRequestCancellationToken> {
         let mut sent_requests = self.sent_requests.lock();
-        if let Some(pos) = sent_requests.iter().position(|r| r.id() == request_id) {
+        if let Some(pos) = sent_requests
+            .iter()
+            .position(|r| r.request_id() == request_id)
+        {
             Some(sent_requests.remove(pos))
         } else {
             None
