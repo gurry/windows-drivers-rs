@@ -90,6 +90,12 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 fn evt_request_read_completion_routine(request: Request, _target: &IoTarget) {
     println!("Read completion routine called");
 
+    // Remove the cancellation token to release the ref-count on the request handle
+    if let Some(queue) = request.get_io_queue() {
+        let device_context = DeviceContext::get(queue.get_device());
+        device_context.take_cancellation_token(request.id());
+    }
+
     let completion_params = request.get_completion_params();
     let status = completion_params.io_status.status;
 
@@ -193,6 +199,12 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
 /// * `target` - The I/O target to which the request was sent.
 fn evt_request_write_completion_routine(request: Request, _target: &IoTarget) {
     println!("Write completion routine called");
+
+    // Remove the cancellation token to release the ref-count on the request handle
+    if let Some(queue) = request.get_io_queue() {
+        let device_context = DeviceContext::get(queue.get_device());
+        device_context.take_cancellation_token(request.id());
+    }
 
     let completion_params = request.get_completion_params();
     let status = completion_params.io_status.status;
