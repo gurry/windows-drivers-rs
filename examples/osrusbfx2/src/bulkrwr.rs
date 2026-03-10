@@ -273,6 +273,6 @@ pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: Request
             return;
         };
 
-        Request::cancel_sent_request(cancellation_token);
+        Request::cancel_sent_request(&cancellation_token);
     }
 }

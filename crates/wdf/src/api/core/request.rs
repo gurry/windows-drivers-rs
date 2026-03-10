@@ -331,7 +331,7 @@ impl Request {
         }
     }
 
-    pub fn cancel_sent_request(token: SentRequestCancellationToken) -> bool {
+    pub fn cancel_sent_request(token: &SentRequestCancellationToken) -> bool {
         let res =
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, token.0) };
 
