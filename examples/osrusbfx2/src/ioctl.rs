@@ -201,7 +201,20 @@ pub fn evt_io_device_control(
 
     let device = queue.get_device();
     let device_context = DeviceContext::get(device);
-    let mut request_pending = false;
+
+    // Handling GET_INTERRUPT_MESSAGE here instead of the match
+    // statement below because it consumes request
+    if control_code == IOCTL_OSRUSBFX2_GET_INTERRUPT_MESSAGE {
+        // Request is forwarded to an interrupt message queue and it won't
+        // be completed until an interrupt from the USB device arrives
+        if let Err((e, request)) = request.forward_to_io_queue(&device_context.interrupt_msg_queue)
+        {
+            println!("IOCTL failed: {:?}", e);
+            request.complete(e.code().into());
+        }
+
+        return;
+    }
 
     let result = match control_code {
         IOCTL_OSRUSBFX2_GET_CONFIG_DESCRIPTOR => {
@@ -220,9 +233,6 @@ pub fn evt_io_device_control(
             set_seven_segment_display(device_context, &request)
         }
         IOCTL_OSRUSBFX2_READ_SWITCHES => get_switch_state(device_context, &mut request),
-        IOCTL_OSRUSBFX2_GET_INTERRUPT_MESSAGE => {
-            get_interrupt_message(device_context, &mut request, &mut request_pending)
-        }
         _ => {
             println!("Unknown IOCTL: {:#X}", control_code);
             Err(status_codes::STATUS_INVALID_DEVICE_REQUEST.into())
@@ -231,14 +241,11 @@ pub fn evt_io_device_control(
 
     match result {
         Ok(bytes_returned) => {
-            if !request_pending {
-                println!(
-                    "IOCTL succeeded, completing request with {} bytes",
-                    bytes_returned
-                );
-                request
-                    .complete_with_information(status_codes::STATUS_SUCCESS.into(), bytes_returned);
-            }
+            println!(
+                "IOCTL succeeded, completing request with {} bytes",
+                bytes_returned
+            );
+            request.complete_with_information(status_codes::STATUS_SUCCESS.into(), bytes_returned);
         }
         Err(e) => {
             println!("IOCTL failed: {:?}", e);
@@ -427,24 +434,6 @@ fn get_switch_state(device_context: &DeviceContext, request: &mut Request) -> Nt
     println!("Switch state: {:#X}", buffer[0]);
 
     Ok(bytes_transferred)
-}
-
-fn get_interrupt_message(
-    device_context: &DeviceContext,
-    request: &mut Request,
-    request_pending: &mut bool,
-) -> NtResult<usize> {
-    println!("Get interrupt message");
-
-    *request_pending = false;
-
-    // Forward the request to an interrupt message queue and don't complete
-    // the request until an interrupt from the USB device occurs
-    request
-        .forward_to_io_queue(&device_context.interrupt_msg_queue)
-        .inspect(|_| *request_pending = true)?;
-
-    Ok(0)
 }
 
 pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus) {

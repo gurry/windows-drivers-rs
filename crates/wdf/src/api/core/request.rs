@@ -277,15 +277,22 @@ impl Request {
         }
     }
 
-    pub fn forward_to_io_queue(&self, queue: &IoQueue) -> NtResult<()> {
-        unsafe {
+    pub fn forward_to_io_queue(self, queue: &IoQueue) -> Result<(), (NtStatusError, Request)> {
+        let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestForwardToIoQueue,
                 self.as_ptr().cast(),
                 queue.as_ptr().cast()
             )
+        };
+
+        if status.is_success() {
+            // Suppress Drop — the request now belongs to the target queue
+            core::mem::forget(self);
+            Ok(())
+        } else {
+            Err((NtStatusError::from(status), self))
         }
-        .ok()
     }
 
     pub fn get_completion_params<'a>(&'a self) -> RequestCompletionParams<'a> {
