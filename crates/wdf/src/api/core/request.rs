@@ -1,5 +1,9 @@
 use alloc::string::String;
-use core::{mem::ManuallyDrop, ptr, slice};
+use core::{
+    mem::{ManuallyDrop, forget},
+    ptr,
+    slice,
+};
 
 use bitflags::bitflags;
 use wdf_macros::object_context;
@@ -270,7 +274,7 @@ impl Request {
         };
 
         if res != 0 {
-            core::mem::forget(self); // Suppress drop which could complete or delete the request
+            forget(self); // Suppress drop which could complete or delete the request
             Ok(())
         } else {
             Err(self)
@@ -288,7 +292,7 @@ impl Request {
 
         if status.is_success() {
             // Suppress Drop — the request now belongs to the target queue
-            core::mem::forget(self);
+            forget(self);
             Ok(())
         } else {
             Err((NtStatusError::from(status), self))
@@ -316,19 +320,16 @@ impl Request {
         status.into()
     }
 
-    pub fn stop_acknowledge_requeue(self) {
-        // Suppress Drop to prevent completion or deletion
-        let request = ManuallyDrop::new(self);
-        unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestStopAcknowledge,
-                request.as_ptr().cast(),
-                1
-            );
-        }
-    }
-
-    pub fn stop_acknowledge_no_requeue(request_id: RequestId) {
+    pub fn stop_acknowledge(mode: StopAcknowledgeMode) {
+        let request_id = match mode {
+            StopAcknowledgeMode::Requeue(request) => {
+                let id = request.id();
+                // Suppress Drop to prevent completion or deletion
+                forget(request);
+                id
+            }
+            StopAcknowledgeMode::NoRequeue(id) => id,
+        };
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestStopAcknowledge,
@@ -876,4 +877,11 @@ bitflags! {
         const PURGE = 0x00000002;
         const CANCELABLE = 0x1000_0000;
     }
+}
+
+/// Indicates how a request should be acknowledged
+/// in `Request::stop_acknowledge`.
+pub enum StopAcknowledgeMode {
+    Requeue(Request),
+    NoRequeue(RequestId),
 }

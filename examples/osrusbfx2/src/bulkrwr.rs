@@ -9,6 +9,7 @@ use wdf::{
     RequestFormatMemory,
     RequestId,
     RequestStopActionFlags,
+    StopAcknowledgeMode,
     println,
     status_codes,
     usb::UsbRequestCompletionParamDetails,
@@ -261,7 +262,7 @@ pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: Request
     println!("I/O stop callback called");
 
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {
-        Request::stop_acknowledge_no_requeue(request_id);
+        Request::stop_acknowledge(StopAcknowledgeMode::NoRequeue(request_id));
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
         let device_context = DeviceContext::get(queue.get_device());
 
