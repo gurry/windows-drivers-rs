@@ -421,6 +421,7 @@ impl Request {
     /// TODO: callers can do real damage through the raw IRP
     /// pointer. We would want to wrap it in safe abstractions
     /// or get rid of this function entirely.
+    #[cfg(driver_model__driver_type = "KMDF")]
     pub fn wdm_get_irp(&self) -> wdk_sys::PIRP {
         unsafe { call_unsafe_wdf_function_binding!(WdfRequestWdmGetIrp, self.as_ptr().cast(),) }
     }
