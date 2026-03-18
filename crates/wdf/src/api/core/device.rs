@@ -1,10 +1,11 @@
 use core::{default::Default, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
+#[cfg(driver_model__driver_type = "KMDF")]
+use wdk_sys::DEVICE_RELATION_TYPE;
 use wdk_sys::{
     BOOLEAN,
     DEVICE_POWER_STATE,
-    DEVICE_RELATION_TYPE,
     DEVPROPKEY,
     DEVPROPTYPE,
     NTSTATUS,
@@ -608,6 +609,7 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_query_remove: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_query_stop: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_usage_notification: Option<fn(&Device, SpecialFileType, bool)>,
+    #[cfg(driver_model__driver_type = "KMDF")]
     pub evt_device_relations_query: Option<fn(&Device, DeviceRelationType)>,
     pub evt_device_usage_notification_ex:
         Option<fn(&Device, SpecialFileType, bool) -> NtResult<()>>,
@@ -631,6 +633,7 @@ impl Default for PnpPowerEventCallbacks {
             evt_device_query_remove: None,
             evt_device_query_stop: None,
             evt_device_usage_notification: None,
+            #[cfg(driver_model__driver_type = "KMDF")]
             evt_device_relations_query: None,
             evt_device_usage_notification_ex: None,
         }
@@ -661,6 +664,7 @@ enum_mapping! {
     }
 }
 
+#[cfg(driver_model__driver_type = "KMDF")]
 enum_mapping! {
     pub enum DeviceRelationType: DEVICE_RELATION_TYPE {
         Bus = BusRelations,
@@ -748,6 +752,7 @@ impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
             raw_callbacks.EvtDeviceUsageNotification = Some(__evt_device_usage_notification);
         }
 
+        #[cfg(driver_model__driver_type = "KMDF")]
         if callbacks.evt_device_relations_query.is_some() {
             raw_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
         }
@@ -822,6 +827,8 @@ unsafe_pnp_power_callback!(evt_device_surprise_removal());
 unsafe_pnp_power_callback!(evt_device_query_remove() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_query_stop() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_usage_notification(notification_type: WDF_SPECIAL_FILE_TYPE => to_rust_special_file_type_enum(notification_type), is_in_notification_path: BOOLEAN => is_in_notification_path == 1));
+
+#[cfg(driver_model__driver_type = "KMDF")]
 unsafe_pnp_power_callback!(evt_device_relations_query(relation_type: DEVICE_RELATION_TYPE => to_rust_device_relation_type_enum(relation_type)));
 unsafe_pnp_power_callback!(evt_device_usage_notification_ex(notification_type: WDF_SPECIAL_FILE_TYPE => to_rust_special_file_type_enum(notification_type), is_in_notification_path: BOOLEAN => is_in_notification_path == 1) -> NTSTATUS);
 
@@ -924,6 +931,7 @@ fn to_rust_special_file_type_enum(file_type: WDF_SPECIAL_FILE_TYPE) -> SpecialFi
         .expect("framework should not send invalid WDF_SPECIAL_FILE_TYPE")
 }
 
+#[cfg(driver_model__driver_type = "KMDF")]
 fn to_rust_device_relation_type_enum(relation_type: DEVICE_RELATION_TYPE) -> DeviceRelationType {
     DeviceRelationType::try_from(relation_type)
         .expect("framework should not send invalid DEVICE_RELATION_TYPE")
