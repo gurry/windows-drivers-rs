@@ -7,7 +7,7 @@ use core::{
 use wdk_sys::{
     _POOL_TYPE,
     _WDF_MEMORY_DESCRIPTOR_TYPE,
-    MDL,
+    PVOID,
     WDF_MEMORY_DESCRIPTOR,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
@@ -238,7 +238,7 @@ fn set_buffer(buf: &[u8], descriptor: &mut WDF_MEMORY_DESCRIPTOR) {
 
 fn set_mdl(mdl: &Mdl, buffer_length: u32, descriptor: &mut WDF_MEMORY_DESCRIPTOR) {
     descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeMdl;
-    descriptor.u.MdlType.Mdl = (mdl as *const Mdl).cast::<MDL>().cast_mut();
+    descriptor.u.MdlType.Mdl = mdl as *const Mdl as PVOID as *mut _;
     descriptor.u.MdlType.BufferLength = buffer_length;
 }
 

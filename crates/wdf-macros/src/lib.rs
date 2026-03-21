@@ -5,127 +5,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, meta::parser, parse_macro_input};
-
-/// A procedural macro that when placed on a safe Rust impl of a driver
-/// generates the relevant FFI wrappers
-#[proc_macro_attribute]
-pub fn driver_impl(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input_clone = input.clone();
-    let item_impl = parse_macro_input!(input_clone as ItemImpl);
-
-    let driver_ty = item_impl.self_ty;
-
-    let mut wrappers: TokenStream = quote! {
-        use wdf::{nt_success, println, WdkAllocator};
-        use wdf::ffi::{
-            ntddk::KeGetCurrentIrql,
-            APC_LEVEL,
-            DRIVER_OBJECT,
-            NTSTATUS,
-            PCUNICODE_STRING,
-            PDRIVER_OBJECT,
-            PWDFDEVICE_INIT,
-            STATUS_SUCCESS,
-            ULONG,
-            UNICODE_STRING,
-            WDFDRIVER,
-            WDFOBJECT,
-            WDFSTRING,
-            WDFDEVICE,
-            WDFDEVICE_INIT,
-            WDF_DRIVER_CONFIG,
-            WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
-            WDF_NO_HANDLE,
-            WDF_NO_OBJECT_ATTRIBUTES,
-        };
-
-        extern crate alloc;
-
-        use alloc::{slice, string::String};
-
-        #[global_allocator]
-        static GLOBAL_ALLOCATOR: WdkAllocator = WdkAllocator;
-
-        static SAFE_DRIVER: #driver_ty = #driver_ty;
-
-        #[link_section = "INIT"]
-        #[export_name = "DriverEntry"] // WDF expects a symbol with the name DriverEntry
-        extern "system" fn driver_entry(driver: &mut DRIVER_OBJECT, registry_path: PCUNICODE_STRING,) -> NTSTATUS {
-            driver.DriverUnload = Some(driver_exit);
-
-            let mut driver_config = WDF_DRIVER_CONFIG {
-                Size: core::mem::size_of::<WDF_DRIVER_CONFIG>() as ULONG,
-                EvtDriverDeviceAdd: Some(evt_driver_device_add),
-                ..WDF_DRIVER_CONFIG::default()
-            };
-
-            let driver_handle_output = WDF_NO_HANDLE.cast::<WDFDRIVER>();
-
-            let nt_status = unsafe {
-                wdk_sys::call_unsafe_wdf_function_binding!(
-                    WdfDriverCreate,
-                    driver as PDRIVER_OBJECT,
-                    registry_path,
-                    WDF_NO_OBJECT_ATTRIBUTES,
-                    &mut driver_config,
-                    driver_handle_output,
-                )
-            };
-
-            if !nt_success(nt_status) {
-                return nt_status;
-            }
-
-            match SAFE_DRIVER.driver_entry() {
-                Ok(_) => 0,
-                Err(nt_status) => nt_status,
-            }
-        }
-
-        #[link_section = "PAGE"]
-        extern "C" fn evt_driver_device_add(
-            _driver: WDFDRIVER,
-            mut device_init: *mut WDFDEVICE_INIT,
-        ) -> NTSTATUS {
-            // println!("EvtDriverDeviceAdd Entered!");
-
-            let mut device_handle_output: WDFDEVICE = WDF_NO_HANDLE.cast();
-
-            let ntstatus;
-            // SAFETY: This is safe because:
-            //       1. `device_init` is provided by `EvtDriverDeviceAdd` and is never null
-            //       2. the argument receiving `WDF_NO_OBJECT_ATTRIBUTES` is allowed to be
-            //          null
-            //       3. `device_handle_output` is expected to be null
-            unsafe {
-                ntstatus = wdk_sys::call_unsafe_wdf_function_binding!(
-                    WdfDeviceCreate,
-                    &mut device_init,
-                    WDF_NO_OBJECT_ATTRIBUTES,
-                    &mut device_handle_output,
-                );
-            }
-
-            // println!("WdfDeviceCreate NTSTATUS: {ntstatus:#02x}");
-
-            match SAFE_DRIVER.evt_driver_device_add() {
-                Ok(_) => 0,
-                Err(nt_status) => nt_status,
-            }
-        }
-
-        extern "C" fn driver_exit(_driver: *mut DRIVER_OBJECT) {
-            // println!("Goodbye World!");
-            // println!("Driver Exit Complete!");
-        }
-    }
-    .into();
-
-    wrappers.extend(input);
-
-    wrappers
-}
+use syn::{Error, Ident, ItemFn, ItemStruct, Lit, meta::parser, parse_macro_input};
 
 /// A procedural macro used to mark the entry point of a WDF driver
 #[proc_macro_attribute]
@@ -359,7 +239,7 @@ fn object_context_impl(
         let extended = quote! {
             #[allow(non_snake_case)]
             extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
-                #wdf_crate_path::bug_check_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
+                #wdf_crate_path::panic_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
             }
         };
 

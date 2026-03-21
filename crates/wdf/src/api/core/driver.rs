@@ -1,13 +1,13 @@
-use alloc::{boxed::Box, string::String};
-use core::{
-    ptr,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+#[cfg(driver_model__driver_type = "KMDF")]
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::ptr;
+#[cfg(driver_model__driver_type = "KMDF")]
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use wdf_macros::object_context;
 #[doc(hidden)]
 pub use wdk_sys::{
-    DRIVER_OBJECT,
     NT_SUCCESS,
     NTSTATUS,
     PCUNICODE_STRING,
@@ -24,6 +24,8 @@ use wdk_sys::{
     call_unsafe_wdf_function_binding,
 };
 
+#[cfg(driver_model__driver_type = "KMDF")]
+use super::tracing::TraceWriter;
 use super::{
     device::DeviceInit,
     guid::Guid,
@@ -31,13 +33,18 @@ use super::{
     object::{Handle, impl_handle},
     result::{NtResult, StatusCodeExt},
     string::{UnicodeString, WString},
-    tracing::TraceWriter,
 };
 use crate::println;
+
+// HACK: DRIVER_OBJECT is not generated in the auto-generated bindings
+// for UMDF (although it is for KMDF) because relevant headers are not
+// included under UMDF currently. Needs a fix in wdk_sys
+pub type DRIVER_OBJECT = wdk_sys::_DRIVER_OBJECT;
 
 /// Global pointer to the heap-allocated `TraceWriter`.
 /// Written once during driver entry (before any concurrent access),
 /// read from `trace()` and `clean_up_tracing()` afterwards.
+#[cfg(driver_model__driver_type = "KMDF")]
 static TRACE_WRITER: AtomicPtr<TraceWriter> = AtomicPtr::new(ptr::null_mut());
 
 /// A safe wrapper around `DRIVER_OBJECT`
@@ -84,6 +91,7 @@ impl Driver {
         let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
         driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
         driver_config.DriverPoolTag = config.pool_tag;
+        driver_config.EvtDriverUnload = Some(driver_unload);
 
         let mut wdf_driver: WDFDRIVER = ptr::null_mut();
 
@@ -150,6 +158,7 @@ impl Driver {
     }
 }
 
+#[cfg(driver_model__driver_type = "KMDF")]
 fn clean_up_tracing() {
     let ptr = TRACE_WRITER.swap(ptr::null_mut(), Ordering::Relaxed);
     if !ptr.is_null() {
@@ -160,6 +169,9 @@ fn clean_up_tracing() {
         // `trace_writer` is dropped here, deallocating the Box
     }
 }
+
+#[cfg(not(driver_model__driver_type = "KMDF"))]
+fn clean_up_tracing() {}
 
 /// Calls the safe driver entry function
 ///
@@ -173,8 +185,6 @@ pub fn call_safe_driver_entry(
     safe_entry: fn(&mut DriverObject, &UnicodeString) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
 ) -> NTSTATUS {
-    driver_object.DriverUnload = Some(wdm_driver_unload);
-
     // SAFETY: `DriverObject` is `#[repr(transparent)]` over `DRIVER_OBJECT`,
     // so this cast is sound.
     let driver_object: &mut DriverObject =
@@ -184,6 +194,7 @@ pub fn call_safe_driver_entry(
     // so casting `PCUNICODE_STRING` to `&UnicodeString` preserves pointer identity.
     let registry_path: &UnicodeString = unsafe { &*(reg_path.cast::<UnicodeString>()) };
 
+    #[cfg(driver_model__driver_type = "KMDF")]
     if let Some(control_guid) = tracing_control_guid {
         let trace_writer =
             unsafe { TraceWriter::init(control_guid, &mut driver_object.0, reg_path) };
@@ -193,6 +204,9 @@ pub fn call_safe_driver_entry(
         let ptr = Box::into_raw(Box::new(trace_writer));
         TRACE_WRITER.store(ptr, Ordering::Relaxed);
     }
+
+    #[cfg(not(driver_model__driver_type = "KMDF"))]
+    let _ = tracing_control_guid;
 
     match safe_entry(driver_object, registry_path) {
         Ok(()) => 0,
@@ -220,7 +234,7 @@ extern "C" fn evt_driver_device_add(
     }
 }
 
-extern "C" fn wdm_driver_unload(_driver: *mut DRIVER_OBJECT) {
+unsafe extern "C" fn driver_unload(_driver: WDFDRIVER) {
     println!("Driver unload");
 
     clean_up_tracing();
@@ -228,9 +242,14 @@ extern "C" fn wdm_driver_unload(_driver: *mut DRIVER_OBJECT) {
     println!("Driver unload done");
 }
 
+// TODO: Support tracing for UMDF drivers
+#[cfg(driver_model__driver_type = "KMDF")]
 pub fn trace(message: &str) {
     let trace_writer = TRACE_WRITER.load(Ordering::Relaxed);
     if !trace_writer.is_null() {
         (unsafe { &*trace_writer }).write(message);
     };
 }
+
+#[cfg(not(driver_model__driver_type = "KMDF"))]
+pub fn trace(_message: &str) {}

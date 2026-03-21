@@ -13,7 +13,7 @@ use wdk_sys::{WDFOBJECT, WDFSPINLOCK, WDFWAITLOCK, call_unsafe_wdf_function_bind
 
 use super::{
     Timeout,
-    object::{Handle, RefCountedHandle, bug_check, init_attributes},
+    object::{Handle, RefCountedHandle, init_attributes, panic},
     result::{NtResult, StatusCodeExt},
 };
 
@@ -270,7 +270,7 @@ impl<T: RefCountedHandle> Arc<T> {
         // early because an overflow would lead to all kinds of unsafety.
         if ref_count.fetch_add(1, Ordering::Relaxed) > usize::MAX / 2 {
             let ref_count = ref_count.load(Ordering::Relaxed);
-            bug_check(0xDEADDEAD, ptr, Some(ref_count));
+            panic(0xDEADDEAD, ptr, Some(ref_count));
         }
 
         // SAFETY: the incoming `ptr` is required to be non-null
@@ -529,7 +529,7 @@ impl<T> AtomicRefCell<T> {
     /// Bugchecks with the address of this cell and the
     /// invalid borrow state value for debugging.
     fn bug_check_invalid_state(&self, state: isize) -> ! {
-        bug_check(
+        panic(
             0xDEADDEAD,
             (self as *const Self).cast_mut().cast::<_>(),
             Some(state as usize),

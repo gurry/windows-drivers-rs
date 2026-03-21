@@ -15,7 +15,6 @@ use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDFOBJECT,
     call_unsafe_wdf_function_binding,
-    ntddk::KeBugCheckEx,
 };
 
 use super::{init_wdf_struct, result::NtResult};
@@ -287,20 +286,34 @@ pub unsafe fn drop_context<C: ObjectContext>(handle: WDFOBJECT) {
     }
 }
 
-pub(crate) fn bug_check_if_ref_count_not_zero<H: RefCountedHandle, C: ObjectContext>(
-    obj: WDFOBJECT,
-) {
+pub(crate) fn panic_if_ref_count_not_zero<H: RefCountedHandle, C: ObjectContext>(obj: WDFOBJECT) {
     let handle = unsafe { &*obj.cast::<H>() };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count != 0 {
-        bug_check(0xDEADDEAD, obj, Some(ref_count as usize));
+        panic(0xDEADDEAD, obj, Some(ref_count as usize));
     }
 }
 
+pub(crate) fn panic(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) -> ! {
+    #[cfg(driver_model__driver_type = "KMDF")]
+    {
+        bug_check(code, obj, ref_count);
+    }
+
+    #[cfg(driver_model__driver_type = "UMDF")]
+    {
+        panic!(
+            "Panic code: {:#x}, Object: {:#x}, Ref count: {:?}",
+            code, obj as usize, ref_count
+        );
+    }
+}
+
+#[cfg(driver_model__driver_type = "KMDF")]
 pub(crate) fn bug_check(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) -> ! {
     let ref_count = ref_count.unwrap_or(0);
     unsafe {
-        KeBugCheckEx(code, obj as u64, ref_count as u64, 0, 0);
+        wdk_sys::ntddk::KeBugCheckEx(code, obj as u64, ref_count as u64, 0, 0);
     }
 }
 
