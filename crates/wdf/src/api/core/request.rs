@@ -495,7 +495,7 @@ macro_rules! define_user_memory_context {
             /// the best place to call it is in from [`reuse`] method
             /// above because it clears the formatting info
             unsafe fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
-                let context = $ctx_name::get_mut(self);
+                let context = $ctx_name::try_get_mut(self)?;
                 context.memory.take()
             }
 
