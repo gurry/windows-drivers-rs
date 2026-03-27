@@ -570,11 +570,20 @@ impl<'a> From<&WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
         let request_type = RequestType::from(raw.Type);
         let io_status = IoStatusBlock::from(raw.IoStatus);
 
+        /// Convert a raw memory handle to an optional reference.
+        fn to_memory_ref<'a>(handle: WDFMEMORY) -> Option<&'a Memory> {
+            if handle.is_null() {
+                None
+            } else {
+                Some(unsafe { &*handle.cast::<Memory>() })
+            }
+        }
+
         let parameters = match request_type {
             RequestType::Write => {
                 let write = unsafe { &raw.Parameters.Write };
                 RequestCompletionParamDetails::Write {
-                    buffer: unsafe { &*(write.Buffer.cast::<Memory>()) },
+                    buffer: to_memory_ref(write.Buffer),
                     length: write.Length as usize,
                     offset: write.Offset as usize,
                 }
@@ -582,7 +591,7 @@ impl<'a> From<&WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
             RequestType::Read => {
                 let read = unsafe { &raw.Parameters.Read };
                 RequestCompletionParamDetails::Read {
-                    buffer: unsafe { &*(read.Buffer.cast::<Memory>()) },
+                    buffer: to_memory_ref(read.Buffer),
                     length: read.Length as usize,
                     offset: read.Offset as usize,
                 }
@@ -591,9 +600,9 @@ impl<'a> From<&WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
                 let ioctl = unsafe { &raw.Parameters.Ioctl };
                 RequestCompletionParamDetails::Ioctl {
                     io_control_code: ioctl.IoControlCode,
-                    input_buffer: unsafe { &*(ioctl.Input.Buffer.cast::<Memory>()) },
+                    input_buffer: to_memory_ref(ioctl.Input.Buffer),
                     input_offset: ioctl.Input.Offset as usize,
-                    output_buffer: unsafe { &*(ioctl.Output.Buffer.cast::<Memory>()) },
+                    output_buffer: to_memory_ref(ioctl.Output.Buffer),
                     output_offset: ioctl.Output.Offset as usize,
                     output_length: ioctl.Output.Length as usize,
                 }
@@ -640,20 +649,20 @@ impl From<IO_STATUS_BLOCK> for IoStatusBlock {
 #[derive(Debug)]
 pub enum RequestCompletionParamDetails<'a> {
     Write {
-        buffer: &'a Memory,
+        buffer: Option<&'a Memory>,
         length: usize,
         offset: usize,
     },
     Read {
-        buffer: &'a Memory,
+        buffer: Option<&'a Memory>,
         length: usize,
         offset: usize,
     },
     Ioctl {
         io_control_code: u32,
-        input_buffer: &'a Memory,
+        input_buffer: Option<&'a Memory>,
         input_offset: usize,
-        output_buffer: &'a Memory,
+        output_buffer: Option<&'a Memory>,
         output_offset: usize,
         output_length: usize,
     },
