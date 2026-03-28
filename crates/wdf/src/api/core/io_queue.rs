@@ -1,4 +1,4 @@
-use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk::nt_success;
@@ -18,13 +18,31 @@ use super::{
     device::Device,
     enum_mapping,
     init_wdf_struct,
-    object::{Handle, impl_ref_counted_handle, init_attributes},
+    object::{Handle, impl_handle, init_attributes},
     request::{Request, RequestId, RequestStopActionFlags},
     result::{NtResult, NtStatusError, StatusCodeExt, status_codes},
     sync::Arc,
 };
 
-impl_ref_counted_handle!(IoQueue, IoQueueContext);
+impl_handle!(IoQueue);
+
+impl super::object::RefCountedHandle for IoQueue {
+    fn get_ref_count(&self) -> &AtomicUsize {
+        let inner_context = IoQueueContext::get(self);
+        &inner_context.ref_count
+    }
+
+    fn delete_raw_handle(&self) {
+        // Delete queue only if it's marked as deletable.
+        // Default queues and queues registered for dispatching
+        // are managed by WDF and should not be deleted by the driver
+        if IoQueueContext::get(self).can_delete.load(Ordering::Relaxed) {
+            unsafe {
+                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr().cast());
+            }
+        }
+    }
+}
 
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> NtResult<Arc<Self>> {
@@ -53,6 +71,7 @@ impl IoQueue {
         .and_then(|| {
             let ctxt = IoQueueContext {
                 ref_count: AtomicUsize::new(0),
+                can_delete: AtomicBool::new(!queue_config.default_queue),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
                 evt_io_write: queue_config.evt_io_write,
@@ -73,6 +92,15 @@ impl IoQueue {
             unsafe { call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast()) };
 
         unsafe { &*(device_ptr.cast::<Device>()) }
+    }
+
+    /// Marks this queue as non-deletable. Called when the queue is registered
+    /// for request dispatching or is a default queue, meaning WDF manages
+    /// its lifetime.
+    pub(crate) fn set_non_deletable(&self) {
+        IoQueueContext::get(self)
+            .can_delete
+            .store(false, Ordering::Relaxed);
     }
 
     pub fn start(&self) {
@@ -220,6 +248,7 @@ impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
 #[object_context_with_ref_count_check(IoQueue)]
 struct IoQueueContext {
     ref_count: AtomicUsize,
+    can_delete: AtomicBool,
     evt_io_default: Option<fn(&IoQueue, Request)>,
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&IoQueue, Request, usize)>,

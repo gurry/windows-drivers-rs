@@ -148,7 +148,13 @@ impl Device {
                 request_type
             )
         }
-        .ok()
+        .ok()?;
+
+        // Once a queue is registered for request dispatching, WDF manages
+        // its lifetime and WdfObjectDelete must not be called on it.
+        queue.set_non_deletable();
+
+        Ok(())
     }
 
     pub fn set_pnp_capabilities(&mut self, capabilities: &DevicePnpCapabilities) {

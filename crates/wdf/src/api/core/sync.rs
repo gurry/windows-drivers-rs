@@ -316,11 +316,7 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
 
             println!("Drop {}: Ref count 0. Deleting obj", Self::type_name());
 
-            // SAFETY: The object is guaranteed to be valid here
-            // because it is deleted only here and no place else
-            unsafe {
-                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr());
-            }
+            obj.delete_raw_handle();
         }
     }
 }

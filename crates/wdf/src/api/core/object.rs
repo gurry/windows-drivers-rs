@@ -26,6 +26,16 @@ pub trait Handle {
 
 pub trait RefCountedHandle: Handle {
     fn get_ref_count(&self) -> &AtomicUsize;
+
+    /// Called by `Arc` when the reference count reaches zero.
+    /// The default implementation calls `WdfObjectDelete`.
+    /// Types that need per-instance control over deletion (e.g. `IoQueue`)
+    /// can override this.
+    fn delete_raw_handle(&self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr().cast());
+        }
+    }
 }
 
 macro_rules! impl_handle {
