@@ -1,4 +1,3 @@
-use alloc::string::String;
 use core::{
     marker::PhantomData,
     ptr,
@@ -21,7 +20,6 @@ use super::{init_wdf_struct, result::NtResult};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
-    fn type_name() -> String;
 }
 
 pub trait RefCountedHandle: Handle {
@@ -49,14 +47,6 @@ macro_rules! impl_handle {
         impl crate::api::object::Handle for $obj {
             fn as_ptr(&self) -> wdk_sys::WDFOBJECT {
                 (self as *const Self).cast_mut().cast()
-            }
-
-            fn type_name() -> alloc::string::String {
-                let name = paste::paste! {
-                    stringify!($obj)
-                };
-
-                alloc::string::String::from(name)
             }
         }
 

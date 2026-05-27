@@ -34,7 +34,6 @@ use super::{
     result::{NtResult, StatusCodeExt},
     string::{UnicodeString, WString},
 };
-use crate::println;
 
 // HACK: DRIVER_OBJECT is not generated in the auto-generated bindings
 // for UMDF (although it is for KMDF) because relevant headers are not
@@ -235,11 +234,7 @@ extern "C" fn evt_driver_device_add(
 }
 
 unsafe extern "C" fn driver_unload(_driver: WDFDRIVER) {
-    println!("Driver unload");
-
     clean_up_tracing();
-
-    println!("Driver unload done");
 }
 
 // TODO: Support tracing for UMDF drivers

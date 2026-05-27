@@ -26,10 +26,6 @@ impl Handle for WString {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0 as WDFOBJECT
     }
-
-    fn type_name() -> String {
-        String::from("WString")
-    }
 }
 
 impl WString {

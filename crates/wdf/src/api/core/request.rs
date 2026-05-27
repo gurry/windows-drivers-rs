@@ -1,4 +1,3 @@
-use alloc::string::String;
 use core::{
     mem::{ManuallyDrop, forget},
     ptr,
@@ -431,10 +430,6 @@ impl Handle for Request {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.cast()
     }
-
-    fn type_name() -> String {
-        String::from("Request")
-    }
 }
 
 /// Although `Request` carries a raw pointer type, `WDFREQUEST`,
@@ -712,10 +707,6 @@ impl CancellableRequest {
 impl Handle for CancellableRequest {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.as_ptr()
-    }
-
-    fn type_name() -> String {
-        String::from("CancellableRequest")
     }
 }
 

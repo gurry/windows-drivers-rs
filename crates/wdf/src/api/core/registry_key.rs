@@ -1,5 +1,3 @@
-use alloc::string::String;
-
 use wdk_sys::{WDFKEY, WDFOBJECT, call_unsafe_wdf_function_binding};
 
 use super::{
@@ -19,10 +17,6 @@ impl Handle for RegistryKey {
     #[inline(always)]
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.cast()
-    }
-
-    fn type_name() -> String {
-        String::from("RegistryKey")
     }
 }
 

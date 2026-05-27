@@ -1,4 +1,3 @@
-use alloc::string::String;
 use core::{
     cell::UnsafeCell,
     ffi::c_void,
@@ -8,7 +7,6 @@ use core::{
     sync::atomic::{AtomicIsize, Ordering, fence},
 };
 
-use wdk::println;
 use wdk_sys::{WDFOBJECT, WDFSPINLOCK, WDFWAITLOCK, call_unsafe_wdf_function_binding};
 
 use super::{
@@ -295,12 +293,6 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         let obj = unsafe { &*self.as_ptr().cast::<T>() };
         let ref_count = obj.get_ref_count();
 
-        println!(
-            "Drop {}: Ref count {}",
-            Self::type_name(),
-            ref_count.load(Ordering::Relaxed)
-        );
-
         // We need to ensure here that if we are the thread doing
         // the final delete (i.e calling WdfObjectDelete) then
         // all other threads are done accessing ptr or we will get
@@ -313,9 +305,6 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         // separate Acquire fence inside the if block.
         if ref_count.fetch_sub(1, Ordering::Release) == 1 {
             fence(Ordering::Acquire);
-
-            println!("Drop {}: Ref count 0. Deleting obj", Self::type_name());
-
             obj.delete_raw_handle();
         }
     }
@@ -325,11 +314,6 @@ impl<T: RefCountedHandle> Handle for Arc<T> {
     #[inline(always)]
     fn as_ptr(&self) -> WDFOBJECT {
         self.ptr.as_ptr()
-    }
-
-    fn type_name() -> String {
-        let type_name = T::type_name();
-        alloc::format!("Arc<{}>", type_name)
     }
 }
 
