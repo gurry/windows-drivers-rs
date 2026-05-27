@@ -24,6 +24,7 @@ use wdk_sys::{
 };
 
 use crate::api::{guid::Guid, string::UnicodeStringBuf};
+use super::result::NtResult;
 
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
@@ -61,7 +62,7 @@ unsafe extern "C" {
 
 macro_rules! get_routine_addr {
     ($name:expr, $callback_type:ty) => {{
-        let name_unicode_string = UnicodeStringBuf::from_rust_str($name);
+        let name_unicode_string = UnicodeStringBuf::from_rust_str($name)?;
         let name_unicode_string_raw = name_unicode_string.as_raw();
 
         let addr = unsafe {
@@ -110,7 +111,7 @@ impl TraceWriter {
         control_guid: Guid,
         wdm_driver: *mut DRIVER_OBJECT,
         reg_path: PCUNICODE_STRING,
-    ) -> Self {
+    ) -> NtResult<Self> {
         // Boxing control_guid to ensure it has a stable address
         // which we can use in WPP_PROJECT_CONTROL_BLOCK::ControlBlock below
         let control_guid = Box::new(control_guid);
@@ -146,12 +147,12 @@ impl TraceWriter {
             etw_unregister,
         };
 
-        TraceWriter {
+        Ok(TraceWriter {
             _control_guid: control_guid,
             trace_config,
             wdm_driver,
             reg_path,
-        }
+        })
     }
 
     /// Starts WPP tracing

@@ -137,7 +137,7 @@ impl Driver {
             return Err(status.into());
         }
 
-        Ok(string.to_rust_string_lossy())
+        string.to_rust_string_lossy()
     }
 
     pub fn is_version_available(&self, major_version: u32, minor_version: u32) -> bool {
@@ -195,8 +195,12 @@ pub fn call_safe_driver_entry(
 
     #[cfg(driver_model__driver_type = "KMDF")]
     if let Some(control_guid) = tracing_control_guid {
-        let trace_writer =
-            unsafe { TraceWriter::init(control_guid, &mut driver_object.0, reg_path) };
+        let trace_writer = match unsafe {
+            TraceWriter::init(control_guid, &mut driver_object.0, reg_path)
+        } {
+            Ok(tw) => tw,
+            Err(e) => return e.code(),
+        };
 
         trace_writer.start();
 

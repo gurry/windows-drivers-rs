@@ -74,7 +74,7 @@ fn set_device_interface_property_data(
     size: ULONG,
     data: PVOID,
 ) -> NtResult<()> {
-    let Some(set_device_interface_property_data) = get_interface_prop_data_routine() else {
+    let Some(set_device_interface_property_data) = get_interface_prop_data_routine()? else {
         println!("Failed to get address of routine {IO_SET_DEVICE_INTERFACE_PROPERTY_DATA}");
         return Err(NtStatusError::from(status_codes::STATUS_NOT_SUPPORTED));
     };
@@ -126,12 +126,14 @@ pub const fn unrestricted_device_capabilities_prop_key() -> DEVPROPKEY {
     }
 }
 
-fn get_interface_prop_data_routine() -> Option<IoSetDeviceInterfacePropertyData> {
-    let routine_name = UnicodeStringBuf::from_rust_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA);
+fn get_interface_prop_data_routine() -> NtResult<Option<IoSetDeviceInterfacePropertyData>> {
+    let routine_name = UnicodeStringBuf::from_rust_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA)?;
     let routine_name_raw = routine_name.as_raw();
 
     let addr = unsafe {
         MmGetSystemRoutineAddress((routine_name_raw as *const UNICODE_STRING).cast_mut())
     };
-    unsafe { core::mem::transmute::<PVOID, Option<IoSetDeviceInterfacePropertyData>>(addr) }
+
+
+    Ok(unsafe { core::mem::transmute::<PVOID, Option<IoSetDeviceInterfacePropertyData>>(addr) })
 }
