@@ -401,6 +401,11 @@ impl<T> AtomicRefCell<T> {
                 return None;
             }
 
+            // Shared borrow count saturated — cannot obtain another borrow.
+            if cur == isize::MAX {
+                return None;
+            }
+
             // `Acquire` on success pairs with `Release` in both
             // AtomicRef::drop and AtomicRefMut::drop. This
             // ensures we see all writes a previous writer
