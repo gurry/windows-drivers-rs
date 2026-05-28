@@ -338,52 +338,6 @@ unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
 /// and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
 
-/// A thread-safe, `Option`-like container
-/// for a values that implement `Clone`.
-///
-/// Provides thread-safe access to `T`
-/// by internally using a `SpinLock`.
-pub struct Slot<T: Clone> {
-    val: SpinLock<Option<T>>,
-}
-
-impl<T: Clone> Slot<T> {
-    /// Creates a new `Slot` with the given inner value
-    ///
-    /// # Errors
-    /// Returns an error if it fails to create the `SpinLock`
-    pub fn try_new(val: Option<T>) -> NtResult<Self> {
-        Ok(Self {
-            val: SpinLock::create(val)?,
-        })
-    }
-
-    /// Returns a clone of the inner value if it exists.
-    ///
-    /// To do it in a thread-safe way, it acquires the
-    /// `SpinLock` first, clones the inner value,
-    /// releases the lock and then returns the value.
-    ///
-    /// # Returns
-    /// `Some(T)` if the inner value exists, `None` otherwise.
-    pub fn get(&self) -> Option<T> {
-        self.val.lock().as_ref().cloned()
-    }
-
-    /// Sets the inner value to `val`
-    pub fn set(&self, val: Option<T>) {
-        *self.val.lock() = val;
-    }
-
-    pub fn is_some(&self) -> bool {
-        self.val.lock().is_some()
-    }
-
-    pub fn is_none(&self) -> bool {
-        self.val.lock().is_none()
-    }
-}
-
 /// Thread-safe version of `RefCell`
 ///
 /// Behaves like a reader-writer lock except it never
