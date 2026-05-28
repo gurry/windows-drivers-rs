@@ -62,7 +62,7 @@ unsafe extern "C" {
 
 macro_rules! get_routine_addr {
     ($name:expr, $callback_type:ty) => {{
-        let name_unicode_string = UnicodeStringBuf::from_rust_str($name)?;
+        let name_unicode_string = UnicodeStringBuf::from_str($name)?;
         let name_unicode_string_raw = name_unicode_string.as_raw();
 
         let addr = unsafe {

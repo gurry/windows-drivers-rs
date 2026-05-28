@@ -127,7 +127,7 @@ pub const fn unrestricted_device_capabilities_prop_key() -> DEVPROPKEY {
 }
 
 fn get_interface_prop_data_routine() -> NtResult<Option<IoSetDeviceInterfacePropertyData>> {
-    let routine_name = UnicodeStringBuf::from_rust_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA)?;
+    let routine_name = UnicodeStringBuf::from_str(IO_SET_DEVICE_INTERFACE_PROPERTY_DATA)?;
     let routine_name_raw = routine_name.as_raw();
 
     let addr = unsafe {

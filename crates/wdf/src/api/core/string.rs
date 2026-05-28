@@ -79,61 +79,59 @@ impl Drop for WString {
     }
 }
 
-/// A wrapper for `UNICODE_STRING` that owns
-/// the buffer that `UNICODE_STRING` points to.
+/// A wrapper over `UNICODE_STRING` that owns its buffer
 pub struct UnicodeStringBuf {
-    _buf: Box<[u16]>, // `_buf` exists only to keep the buffer alive
+    // Owned buffer to which `unicode_str` points.
+    // This field is not accessed. It exists just to
+    // keep the buffer alive
+    _buf: Option<Box<[u16]>>,
     unicode_str: UNICODE_STRING,
 }
 
 impl UnicodeStringBuf {
-    pub fn from_rust_str(rust_str: &str) -> NtResult<Self> {
-        let buf = Self::to_utf16_buf(rust_str)?;
-        let unicode_str = Self::create_raw_unicode_string_from(&buf)?;
-        Ok(Self {
-            _buf: buf,
-            unicode_str,
-        })
-    }
-
-    /// Creates a `UnicodeStringBuf` from a raw `UNICODE_STRING`.
+    /// Creates a `UnicodeStringBuf` from a Rust `&str`.
     /// 
-    /// Allocates its own buffer and copies the contents of `unicode_str` into it.
+    /// Converts `&str` to UTF-16 and stores the result
+    /// into the owned buffer.
     /// 
-    /// # Safety
+    /// # Errors
     /// 
-    /// The caller must ensure that `unicode_str` is a valid `UNICODE_STRING`.
-    pub unsafe fn from_raw(unicode_str: UNICODE_STRING) -> NtResult<Self> {
-        // This implementation ensures we don't panick on OOM
-        // by precomputing the required capacity and using
-        // `try_reserve_exact`.
+    /// Returns an `NtStatusError` if allocation of the owned
+    /// buffer fails
+    pub fn from_str(s: &str) -> NtResult<Self> {
+        // This method carefully avoids panic on OOM by
+        // using `try_reserve_exact`.
+        // Unfortunately it means we iterate over the string twice.
 
-        // SAFETY: As per the contract of this function,
-        // the caller must ensure that `unicode_str` is valid
-        let slice = unsafe {
-            core::slice::from_raw_parts(
-                unicode_str.Buffer,
-                (unicode_str.MaximumLength / 2) as usize,
-            )
-        };
+        // Compute the exact number of UTF-16 code units
+        let utf16_len = s.chars().map(|c| c.len_utf16()).sum::<usize>();
+        let utf16_byte_len = utf16_len * 2;
 
-        let mut vec = Vec::new();
-        vec.try_reserve_exact(slice.len())
+        // `UNICODE_STRING` uses `u16` for length fields
+        // so we must ensure byte length fits into it
+        if utf16_byte_len > u16::MAX as usize {
+            return Err(NtStatusError::from(status_codes::STATUS_INVALID_PARAMETER));
+        }
+
+        let mut buf = Vec::new();
+        buf
+            .try_reserve_exact(utf16_len)
             .map_err(|_| NtStatusError::from(status_codes::STATUS_INSUFFICIENT_RESOURCES))?;
-        vec.extend_from_slice(slice);
+        buf.extend(s.encode_utf16());
 
-        // len == capacity, so into_boxed_slice() won't reallocate
-        // and panic on allocation failure
-        debug_assert_eq!(vec.len(), vec.capacity());
-        let buf = vec.into_boxed_slice();
-
-        let buf_ptr = buf.as_ptr().cast_mut().cast();
+        // len must match capacity because otherwise into_boxed_slice would allocate
+        // and thereby potentially cause OOM panic which we want to avoid
+        debug_assert_eq!(buf.len(), buf.capacity());
+        let buf = buf.into_boxed_slice();
+        
+        let buf_ptr = buf.as_ptr().cast_mut();
 
         Ok(Self {
-            _buf: buf,
+            _buf: Some(buf),
             unicode_str: UNICODE_STRING {
                 Buffer: buf_ptr,
-                ..unicode_str
+                Length: utf16_byte_len as u16,
+                MaximumLength: utf16_byte_len as u16,
             },
         })
     }
@@ -141,51 +139,12 @@ impl UnicodeStringBuf {
     pub fn to_string_lossy(&self) -> NtResult<String> {
         // SAFETY: The way this type is constructed ensures
         // that `self.unicode_str` is a valid `UNICODE_STRING`.
-        unsafe { to_string_lossy(self.unicode_str) }
+        unsafe { to_string_lossy(self.as_raw()) }
     }
 
+    #[inline(always)]
     pub fn as_raw(&self) -> &UNICODE_STRING {
         &self.unicode_str
-    }
-
-    fn create_raw_unicode_string_from(buf: &[u16]) -> NtResult<UNICODE_STRING> {
-        let byte_len = buf.len() * 2;
-
-        if byte_len > u16::MAX as usize {
-            return Err(NtStatusError::from(status_codes::STATUS_INVALID_PARAMETER));
-        }
-
-        let byte_len = byte_len as u16;
-        Ok(UNICODE_STRING {
-            Length: byte_len,
-            MaximumLength: byte_len,
-            Buffer: buf.as_ptr().cast_mut().cast(),
-        })
-    }
-
-    /// Converts a `&str` to a UTF-16 encoded buffer.
-    /// 
-    /// # Errors
-    /// Returns an `NtStatusError` if memory allocation fails.
-    fn to_utf16_buf(rust_str: &str) -> NtResult<Box<[u16]>> {
-        // This implementation ensures we don't panick on OOM
-        // by precomputing the required capacity and using `try_reserve_exact`.
-        // Unfortunately it means we iterate over the string twice.
-
-        // Compute the exact number of UTF-16 code units
-        let utf16_len = rust_str.chars().map(|c| c.len_utf16()).sum::<usize>();
-
-        let mut utf16_vec = Vec::new();
-        utf16_vec
-            .try_reserve_exact(utf16_len)
-            .map_err(|_| NtStatusError::from(status_codes::STATUS_INSUFFICIENT_RESOURCES))?;
-
-        utf16_vec.extend(rust_str.encode_utf16());
-
-        // len == capacity, so into_boxed_slice() won't reallocate
-        // and panic on allocation failure
-        debug_assert_eq!(utf16_vec.len(), utf16_vec.capacity());
-        Ok(utf16_vec.into_boxed_slice())
     }
 }
 
@@ -199,15 +158,25 @@ impl UnicodeStringBuf {
 /// # Errors
 /// 
 /// Returns an `NtStatusError` if memory allocation fails during string construction.
-unsafe fn to_string_lossy(unicode_str: UNICODE_STRING) -> NtResult<String> {
-    // This implementation ensures we don't panick on OOM
-    // by precomputing the required capacity and using `try_reserve_exact`.
-    // Unfortunately it means we iterate over the string twice.
+unsafe fn to_string_lossy(unicode_str: &UNICODE_STRING) -> NtResult<String> {
+    // We avoid panic on OOM by carefully using
+    // APIs like `try_reserve_exact`.
 
+    // If length is 0 then the buffer can be null,
+    // so we return an empty string without trying
+    // to read from the buffer.
+    if unicode_str.Length  == 0 {
+        return Ok(String::new()); // No panic on OOM risk as String::new() does not allocate
+    }
+
+    // SAFETY: The caller must ensure `unicode_str` is valid.
+    // We have checked that Length is non-zero above,
+    // so Buffer must be non-null and valid for `len` elements.
     let slice =
         unsafe { core::slice::from_raw_parts(unicode_str.Buffer, unicode_str.Length as usize / 2) };
 
-    // Compute the UTF-8 byte length needed
+    // Compute the UTF-8 byte length needed for reserving.
+    // Unfortunately it means we iterate over the string twice.
     let utf8_len: usize = char::decode_utf16(slice.iter().copied())
         .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER).len_utf8())
         .sum();
@@ -251,7 +220,7 @@ impl<'a> UnicodeString<'a> {
     pub fn to_string_lossy(&self) -> NtResult<String> {
         // SAFETY: As per the contract of this type
         // `self.unicode_str` is a valid `UNICODE_STRING`.
-        unsafe { to_string_lossy(self.unicode_str) }
+        unsafe { to_string_lossy(&self.unicode_str) }
     }
 
     pub fn as_raw(&self) -> &UNICODE_STRING {
