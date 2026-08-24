@@ -135,6 +135,9 @@ pub unsafe trait ObjectContext: Sync {
 // or HeapAlloc which are the two functions used by WDF.
 const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
+// TODO: Can we using something like the placing crate (https://crates.io/crates/placing)
+// to create the context in place instead of creating it and then copying it over
+// to the WDF allocated memory?
 pub unsafe fn attach_context<H: Handle, C: ObjectContext>(
     handle: &H,
     context: C,
