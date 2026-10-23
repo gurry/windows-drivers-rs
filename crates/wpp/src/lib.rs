@@ -8,14 +8,19 @@
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod etw;
 pub mod field;
+#[cfg(feature = "kernel_mode")]
+pub mod ifr;
 pub mod provider;
 
-pub use field::WppField;
+pub use field::{IntoWppField, WppField, WppValue};
+#[cfg(feature = "kernel_mode")]
+pub use ifr::IFRState;
 pub use provider::ProviderState;
-pub use wpp_macros::__wpp_trace_impl;
-pub use wpp_macros::wpp_control_guids;
+pub use wpp_macros::{__wpp_trace_impl, WppField, wpp_control_guids};
 
 /// GUID layout matching the Windows GUID structure.
 #[repr(C)]

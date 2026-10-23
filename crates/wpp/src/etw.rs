@@ -29,6 +29,17 @@ pub struct EVENT_DATA_DESCRIPTOR {
     pub Reserved: u32,
 }
 
+/// `EVENT_DATA_DESCRIPTOR.Type` value marking a descriptor as the per-event
+/// decode GUID (RS name: `EVENT_DATA_DESCRIPTOR_TYPE_DECODE_GUID`; servicing
+/// name: `EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1`).
+///
+/// The `Type` field is the low byte of the `Reserved` union, so setting the
+/// whole `Reserved` word to this value tags the descriptor's `Ptr`/`Size` as a
+/// `GUID` used for TMF decode lookup rather than as event payload. Requires the
+/// provider to have opted in via [`enable_modern_wpp`] (which sets
+/// `EventProviderUseDescriptorType`).
+pub const EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1: u32 = 4;
+
 /// Enable callback function pointer type.
 type EnableCallback = Option<
     unsafe extern "system" fn(
@@ -106,17 +117,16 @@ unsafe extern "system" {
 #[cfg(feature = "kernel_mode")]
 use self::{
     EtwRegister as event_register,
-    EtwWriteTransfer as event_write,
-    EtwUnregister as event_unregister,
     EtwSetInformation as event_set_information,
+    EtwUnregister as event_unregister,
+    EtwWriteTransfer as event_write,
 };
-
 #[cfg(not(feature = "kernel_mode"))]
 use self::{
     EventRegister as event_register,
-    EventWriteTransfer as event_write,
-    EventUnregister as event_unregister,
     EventSetInformation as event_set_information,
+    EventUnregister as event_unregister,
+    EventWriteTransfer as event_write,
 };
 
 // ── Public wrappers ─────────────────────────────────────────────────────────
@@ -162,32 +172,59 @@ pub unsafe fn unregister(handle: u64) -> u32 {
     unsafe { event_unregister(handle) }
 }
 
-/// Set the decode GUID trait on a registered provider.
+/// Marks a registered provider as a ModernWpp (WPPv3) trace-message provider.
+///
+/// This corresponds to `EtwSetInformation(RegHandle, EventProviderSetReserved2,
+/// NULL, 0)`. It requests that the kernel:
+///
+/// * stamp `EVENT_HEADER_FLAG_RESERVED1` on every event written by this
+///   provider, so the trace decoder routes the (Crimson) events to the WPP/TMF
+///   decode path, and
+/// * track the binary's **DebugId** (PDB signature) so the decoder can locate
+///   the PDB that carries the WPPv1 `TMF:`/`TMC:` annotations.
+///
+/// It additionally sets `EventProviderUseDescriptorType`, so that the kernel
+/// honours `EVENT_DATA_DESCRIPTOR.Type`. This is required for the per-module
+/// decode-GUID model (Option B): each event prepends a descriptor of type
+/// [`EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1`] carrying the module's decode GUID,
+/// which the kernel copies into `EventHeader.ProviderId` (with
+/// `EVENT_HEADER_FLAG_DECODE_GUID`). The decoder then looks up that module's
+/// TMF under the decode GUID — decoupled from the provider control GUID used
+/// for registration and enablement.
+///
+/// This is best-effort: on kernels without `Feature_ModernWpp`, the call
+/// returns a failure status (e.g. `STATUS_INVALID_DEVICE_REQUEST`) and the
+/// caller should ignore it — the driver still loads, only PDB/TMF decoding of
+/// these events is unavailable. The returned status is that of the primary
+/// `EventProviderSetReserved2` call.
 ///
 /// # Safety
 ///
-/// `handle` must be a valid registration handle. `decode_guid` must
-/// point to a valid GUID.
-pub unsafe fn set_decode_guid(handle: u64, decode_guid: &GUID) -> u32 {
-    let mut traits = [0u8; 22];
-    let blob_size: u16 = 22;
-    traits[0..2].copy_from_slice(&blob_size.to_le_bytes());
-    traits[2] = 0; // empty provider name
-    let trait_size: u16 = 19;
-    traits[3..5].copy_from_slice(&trait_size.to_le_bytes());
-    traits[5] = 2; // EtwProviderTraitDecodeGuid
-    traits[6..10].copy_from_slice(&decode_guid.data1.to_le_bytes());
-    traits[10..12].copy_from_slice(&decode_guid.data2.to_le_bytes());
-    traits[12..14].copy_from_slice(&decode_guid.data3.to_le_bytes());
-    traits[14..22].copy_from_slice(&decode_guid.data4);
+/// `handle` must be a valid registration handle that has not been unregistered.
+pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
+    // EVENT_INFO_CLASS::EventProviderSetReserved2 (a.k.a.
+    // EventProviderTraceMessage). Not present in the public SDK enum (which
+    // ends at EventProviderUseDescriptorType = 3 / MaxEventInfo = 4); defined
+    // by the ModernWpp-capable OS.
+    const EVENT_INFO_CLASS_SET_RESERVED2: u32 = 4;
+    // EVENT_INFO_CLASS::EventProviderUseDescriptorType — honour
+    // `EVENT_DATA_DESCRIPTOR.Type` so the leading RESERVED1 descriptor is
+    // treated as the decode GUID (metadata) instead of event payload.
+    const EVENT_INFO_CLASS_USE_DESCRIPTOR_TYPE: u32 = 3;
 
-    const EVENT_INFO_CLASS_SET_TRAITS: u32 = 2;
-    unsafe {
+    let status = unsafe {
+        event_set_information(handle, EVENT_INFO_CLASS_SET_RESERVED2, core::ptr::null(), 0)
+    };
+
+    let use_descriptor_type: u8 = 1; // BOOLEAN TRUE
+    let _ = unsafe {
         event_set_information(
             handle,
-            EVENT_INFO_CLASS_SET_TRAITS,
-            traits.as_ptr() as *const core::ffi::c_void,
-            traits.len() as u32,
+            EVENT_INFO_CLASS_USE_DESCRIPTOR_TYPE,
+            &use_descriptor_type as *const u8 as *const core::ffi::c_void,
+            core::mem::size_of::<u8>() as u32,
         )
-    }
+    };
+
+    status
 }
